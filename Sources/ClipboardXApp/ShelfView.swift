@@ -609,7 +609,9 @@ struct QuickLookView: View {
         }
         .padding(16).frame(width: 580, height: 440)
         .shelfGlass(cornerRadius: 22)
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.14)))
+        .shadow(color: .black.opacity(0.4), radius: 22, y: 8)
+        .padding(ShelfController.pad)
         .preferredColorScheme(.dark)
         .onAppear { PreviewStore.shared.load(card.record) { preview = $0 } }
         .task {

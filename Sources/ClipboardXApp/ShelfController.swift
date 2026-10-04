@@ -114,18 +114,18 @@ final class ShelfController {
             if wasOpen, panel.isVisible { panel.makeKey() }
             return
         }
-        let size = NSSize(width: 580, height: 440)
+        let size = NSSize(width: 580 + Self.pad * 2, height: 440 + Self.pad * 2)
         let look = quickLookPanel ?? QuickLookPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel],
                                              backing: .buffered, defer: false)
         look.isOpaque = false
         look.backgroundColor = .clear
-        look.hasShadow = true
+        look.hasShadow = false   // the glass draws its own shadow, so no square window shadow shows at the corners
         look.isFloatingPanel = true
         look.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
         look.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         look.contentView = NSHostingView(rootView: QuickLookView(card: card, model: model))
         let shelf = panel.frame
-        look.setFrame(NSRect(x: shelf.midX - size.width / 2, y: shelf.maxY - Self.pad + 10, width: size.width, height: size.height), display: true)
+        look.setFrame(NSRect(x: shelf.midX - size.width / 2, y: shelf.maxY - Self.pad * 2 + 10, width: size.width, height: size.height), display: true)
         quickLookOpen = true
         look.orderFrontRegardless()
         look.makeKey()
