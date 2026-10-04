@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotKey: HotKey?
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
+    private var backdrop: NSWindow?
     private let settings = AppSettings.shared
     private var backupItem: NSMenuItem!
     private var countItem: NSMenuItem!
@@ -38,11 +39,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.onPaste = { [weak self] record, plain in self?.paste(record, plain: plain) }
         model.onOpenSettings = { [weak self] in self?.shelf.hide(); self?.openSettings() }
 
+        // Demo mode (screenshots) never records the real clipboard and never writes to the iCloud backup.
+        let demo = env["CLIPBOARDX_DEMO"] == "1"
         monitor = PasteboardMonitor(engine: engine, settings: settings)
-        monitor.start()
         backup = BackupScheduler(library: library, deviceID: device, settings: settings)
         backup.onStatus = { [weak self] in self?.backupItem?.title = self?.backup.status ?? "" }
-        backup.start()
+        if !demo {
+            monitor.start()
+            backup.start()
+        }
+        if env["CLIPBOARDX_DEMO_BACKDROP"] == "1" { showBackdrop() }
 
         hotKey = HotKey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey), id: 1) { [weak self] in self?.shelf.toggle() }
         if hotKey == nil {
@@ -61,6 +67,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let board { self?.model.selectBoard(board) }
             }
         }
+    }
+
+    /// Screenshots only: a plain gradient window behind the shelf so no real desktop content shows through the glass.
+    private func showBackdrop() {
+        guard let screen = NSScreen.main else { return }
+        let window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.level = .popUpMenu
+        window.isOpaque = true
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.contentView = NSHostingView(rootView: ZStack {
+            LinearGradient(colors: [Color(red: 0.06, green: 0.10, blue: 0.28), Color(red: 0.30, green: 0.14, blue: 0.48), Color(red: 0.05, green: 0.38, blue: 0.50)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Circle().fill(Color(red: 1.0, green: 0.45, blue: 0.35).opacity(0.55)).frame(width: 520).blur(radius: 90).offset(x: -520, y: 280)
+            Circle().fill(Color(red: 0.25, green: 0.85, blue: 0.95).opacity(0.50)).frame(width: 600).blur(radius: 100).offset(x: 480, y: 300)
+            Circle().fill(Color(red: 0.95, green: 0.80, blue: 0.30).opacity(0.40)).frame(width: 420).blur(radius: 90).offset(x: 40, y: 320)
+        }.ignoresSafeArea())
+        window.orderFrontRegardless()
+        backdrop = window
     }
 
     private func paste(_ record: ClipRecord, plain: Bool) {

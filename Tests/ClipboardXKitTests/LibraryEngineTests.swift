@@ -57,6 +57,22 @@ final class LibraryEngineTests: XCTestCase {
         XCTAssertEqual(try engine.search("alpha", board: nil, limit: 5).map(\.id), [a.id])
     }
 
+    func testBoardKeepsItsColor() throws {
+        try engine.addBoard(id: "list:blue", name: "Blue", colorCode: 0xFF0A84FF)
+        try engine.addBoard(id: "list:none", name: "Plain")
+        let boards = try engine.boards()
+        XCTAssertEqual(engine.boardColorCode(try XCTUnwrap(boards.first { $0.id == "list:blue" })), 0xFF0A84FF)
+        XCTAssertNil(engine.boardColorCode(try XCTUnwrap(boards.first { $0.id == "list:none" })))
+    }
+
+    func testBoardColorSurvivesIndexRebuild() throws {
+        try engine.addBoard(id: "list:blue", name: "Blue", colorCode: 0xFF0A84FF)
+        engine = nil
+        _ = try IndexBuilder.rebuild(library: dir)
+        engine = try LibraryEngine(library: dir, deviceID: "dev1")
+        XCTAssertEqual(engine.boardColorCode(try XCTUnwrap(try engine.boards().first { $0.id == "list:blue" })), 0xFF0A84FF)
+    }
+
     func testBoardsAndAppIconsAreAvailable() throws {
         try engine.addBoard(id: "list:codes", name: "Codes")
         _ = try engine.capture(items: textItem("x"), source: terminal, now: 1)

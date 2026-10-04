@@ -51,7 +51,10 @@ final class ShelfController {
         model.resetForShow()
         if let query { model.query = query }
         let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
-        let target = NSRect(x: screen.frame.minX + Self.margin, y: screen.frame.minY + Self.margin, width: screen.frame.width - Self.margin * 2, height: Self.height)
+        // CLIPBOARDX_SHELF_WIDTH narrows and centers the shelf; used only to frame screenshots.
+        let full = screen.frame.width - Self.margin * 2
+        let width = ProcessInfo.processInfo.environment["CLIPBOARDX_SHELF_WIDTH"].flatMap(Double.init).map { min(CGFloat($0), full) } ?? full
+        let target = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.minY + Self.margin, width: width, height: Self.height)
         panel.setFrame(target.offsetBy(dx: 0, dy: -(Self.height + Self.margin)), display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()

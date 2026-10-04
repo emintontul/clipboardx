@@ -107,7 +107,8 @@ final class ShelfModel: ObservableObject {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         addingBoard = false
         guard !trimmed.isEmpty else { return }
-        try? engine.addBoard(id: "list:" + UUID().uuidString, name: trimmed)
+        let palette: [UInt32] = [0xFFFF453A, 0xFF32D74B, 0xFFBF5AF2, 0xFFFFD60A, 0xFFFF9F0A, 0xFF0A84FF, 0xFF64D2FF]
+        try? engine.addBoard(id: "list:" + UUID().uuidString, name: trimmed, colorCode: palette[boards.count % palette.count])
         refreshBoards()
         selectBoard(boards.count - 1)
     }

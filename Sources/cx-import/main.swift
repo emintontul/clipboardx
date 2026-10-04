@@ -13,6 +13,11 @@ func option(_ name: String, in args: [String]) -> URL? {
 
 let args = Array(CommandLine.arguments.dropFirst())
 
+if args.first == "demo" {
+    guard let out = option("--out", in: args) else { fail("usage: cx-import demo --out <empty folder>") }
+    do { try DemoSeed.run(at: out); exit(0) } catch { fail("error: \(error)") }
+}
+
 if ["backup", "restore", "backup-verify"].contains(args.first ?? "") {
     let deviceID = ProcessInfo.processInfo.hostName.replacingOccurrences(of: " ", with: "-")
     do {

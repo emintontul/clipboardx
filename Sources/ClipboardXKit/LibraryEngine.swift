@@ -84,10 +84,15 @@ public final class LibraryEngine {
         }
     }
 
-    public func addBoard(id: String, name: String) throws {
+    /// `colorCode` is ARGB, the same encoding Paste uses, so imported and new pinboards read the same way.
+    public func addBoard(id: String, name: String, colorCode: UInt32? = nil) throws {
         try locked {
             let next = (try index.boards().map(\.index).max() ?? -1) + 1
-            let board = BoardRecord(id: id, name: name, index: next, kind: 2, createdAt: Date().timeIntervalSince1970, attributesBlob: nil)
+            let attributes = try colorCode.map { code -> String in
+                let json = try JSONSerialization.data(withJSONObject: ["type": "pinboard", "colorCode": code], options: [.sortedKeys])
+                return try blobs.put(json)
+            }
+            let board = BoardRecord(id: id, name: name, index: next, kind: 2, createdAt: Date().timeIntervalSince1970, attributesBlob: attributes)
             try log.append(.board(board)); try log.sync()
             try index.upsertBoard(board)
         }
