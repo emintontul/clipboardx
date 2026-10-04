@@ -116,6 +116,34 @@ final class LibraryEngineTests: XCTestCase {
         XCTAssertEqual(try engine.recent(board: nil, limit: 10).map(\.id), [rec.id])
     }
 
+    // MARK: link previews
+
+    func testSavedLinkPreviewIsReadBack() throws {
+        let icon = Data([0x89, 0x50, 1]), image = Data([0xFF, 0xD8, 2])
+        let saved = try engine.saveLink(url: "https://swift.org/blog", title: "Swift Blog", icon: icon, image: image, now: 100)
+        let read = try XCTUnwrap(try engine.linkRecord(for: "https://swift.org/blog"))
+        XCTAssertEqual(read, saved)
+        XCTAssertEqual(read.title, "Swift Blog")
+        XCTAssertEqual(engine.linkBlob(try XCTUnwrap(read.iconBlob)), icon)
+        XCTAssertEqual(engine.linkBlob(try XCTUnwrap(read.imageBlob)), image)
+        XCTAssertNil(try engine.linkRecord(for: "https://unknown.example"))
+    }
+
+    func testFailedLookupIsRemembered() throws {
+        try engine.saveLink(url: "https://down.example", title: nil, icon: nil, image: nil, failed: true, now: 50)
+        let read = try XCTUnwrap(try engine.linkRecord(for: "https://down.example"))
+        XCTAssertTrue(read.failed)
+        XCTAssertEqual(read.fetchedAt, 50)
+    }
+
+    func testLinkPreviewSurvivesIndexRebuild() throws {
+        try engine.saveLink(url: "https://swift.org", title: "Swift", icon: nil, image: Data([1, 2, 3]), now: 10)
+        engine = nil
+        _ = try IndexBuilder.rebuild(library: dir)
+        engine = try LibraryEngine(library: dir, deviceID: "dev1")
+        XCTAssertEqual(try engine.linkRecord(for: "https://swift.org")?.title, "Swift")
+    }
+
     // MARK: filters
 
     private func fileItem(_ url: String) -> [PasteboardItem] {

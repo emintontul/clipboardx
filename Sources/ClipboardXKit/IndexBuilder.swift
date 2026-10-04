@@ -31,7 +31,7 @@ public enum IndexBuilder {
                 if n % 5000 == 0 { progress?(n, records.count) }
             }
         }
-        try index.replaceMetadata(boards: Array(state.boards.values), apps: Array(state.apps.values))
+        try index.replaceMetadata(boards: Array(state.boards.values), apps: Array(state.apps.values), links: Array(state.links.values))
         progress?(records.count, records.count)
         return IndexBuildSummary(documents: records.count, withText: withText, seconds: Date().timeIntervalSince(started))
     }

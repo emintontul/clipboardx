@@ -126,11 +126,32 @@ public struct AppRecord: Codable, Equatable, Sendable {
     }
 }
 
+/// What a fetched page looked like: title plus cached icon and image blobs. `failed` remembers a lookup that did not work,
+/// so the same link is not requested again and again.
+public struct LinkRecord: Codable, Equatable, Sendable {
+    public let url: String
+    public let title: String?
+    public let iconBlob: String?
+    public let imageBlob: String?
+    public let fetchedAt: Double
+    public let failed: Bool
+
+    public init(url: String, title: String?, iconBlob: String?, imageBlob: String?, fetchedAt: Double, failed: Bool) {
+        self.url = url
+        self.title = title
+        self.iconBlob = iconBlob
+        self.imageBlob = imageBlob
+        self.fetchedAt = fetchedAt
+        self.failed = failed
+    }
+}
+
 /// One line of the append-only log. History is derived from these; nothing here is ever rewritten.
 public enum ClipEvent: Codable, Equatable, Sendable {
     case put(ClipRecord)
     case board(BoardRecord)
     case app(AppRecord)
+    case link(LinkRecord)
     case delete(String)
     case restore(String)
     case purge(String)
@@ -143,6 +164,7 @@ public enum ClipEvent: Codable, Equatable, Sendable {
         case "put": self = .put(try c.decode(ClipRecord.self, forKey: .record))
         case "board": self = .board(try c.decode(BoardRecord.self, forKey: .record))
         case "app": self = .app(try c.decode(AppRecord.self, forKey: .record))
+        case "link": self = .link(try c.decode(LinkRecord.self, forKey: .record))
         case "delete": self = .delete(try c.decode(String.self, forKey: .id))
         case "restore": self = .restore(try c.decode(String.self, forKey: .id))
         case "purge": self = .purge(try c.decode(String.self, forKey: .id))
@@ -157,6 +179,7 @@ public enum ClipEvent: Codable, Equatable, Sendable {
         case .put(let r): try c.encode("put", forKey: .op); try c.encode(r, forKey: .record)
         case .board(let r): try c.encode("board", forKey: .op); try c.encode(r, forKey: .record)
         case .app(let r): try c.encode("app", forKey: .op); try c.encode(r, forKey: .record)
+        case .link(let r): try c.encode("link", forKey: .op); try c.encode(r, forKey: .record)
         case .delete(let id): try c.encode("delete", forKey: .op); try c.encode(id, forKey: .id)
         case .restore(let id): try c.encode("restore", forKey: .op); try c.encode(id, forKey: .id)
         case .purge(let id): try c.encode("purge", forKey: .op); try c.encode(id, forKey: .id)

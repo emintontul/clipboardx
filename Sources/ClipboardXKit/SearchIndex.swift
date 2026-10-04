@@ -43,7 +43,7 @@ public enum SearchScope: Equatable, Sendable {
 public final class SearchIndex {
     public enum IndexError: Error { case outdated }
 
-    public static let schemaVersion = 4
+    public static let schemaVersion = 5
     private static let bodyLimit = 8_000
     private let db: SQLiteDatabase
     private var appNames: Set<String>?
@@ -77,6 +77,7 @@ public final class SearchIndex {
           title_c, body_c, app_c, title_n, body_n, tokenize='trigram')
         """)
         try db.execute("CREATE TABLE IF NOT EXISTS boards(id TEXT PRIMARY KEY, name TEXT NOT NULL, idx INTEGER NOT NULL, kind INTEGER NOT NULL, created REAL NOT NULL, attrs TEXT, deleted REAL)")
+        try db.execute("CREATE TABLE IF NOT EXISTS links(url TEXT PRIMARY KEY, title TEXT, icon TEXT, image TEXT, fetched REAL NOT NULL, failed INTEGER NOT NULL)")
         try db.execute("CREATE TABLE IF NOT EXISTS apps(bundle TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT)")
         try db.execute("PRAGMA user_version = \(Self.schemaVersion)")
     }
@@ -108,11 +109,27 @@ public final class SearchIndex {
                        [.text(app.bundleID), .text(app.name), app.iconBlob.map(SQLValue.text) ?? .null])
     }
 
-    /// Writes boards and apps in one transaction (rebuilds).
-    public func replaceMetadata(boards: [BoardRecord], apps: [AppRecord]) throws {
+    public func upsertLink(_ link: LinkRecord) throws {
+        try db.execute("INSERT OR REPLACE INTO links(url,title,icon,image,fetched,failed) VALUES(?,?,?,?,?,?)",
+                       [.text(link.url), link.title.map(SQLValue.text) ?? .null, link.iconBlob.map(SQLValue.text) ?? .null,
+                        link.imageBlob.map(SQLValue.text) ?? .null, .double(link.fetchedAt), .int(link.failed ? 1 : 0)])
+    }
+
+    public func link(url: String) throws -> LinkRecord? {
+        var out: LinkRecord?
+        try db.query("SELECT url,title,icon,image,fetched,failed FROM links WHERE url=?", [.text(url)]) { r in
+            out = LinkRecord(url: r.text(0) ?? "", title: r.text(1), iconBlob: r.text(2), imageBlob: r.text(3),
+                             fetchedAt: r.double(4) ?? 0, failed: (r.int(5) ?? 0) != 0)
+        }
+        return out
+    }
+
+    /// Writes boards, apps and link previews in one transaction (rebuilds).
+    public func replaceMetadata(boards: [BoardRecord], apps: [AppRecord], links: [LinkRecord] = []) throws {
         try db.transaction {
             for board in boards { try upsertBoard(board) }
             for app in apps { try upsertApp(app) }
+            for link in links { try upsertLink(link) }
         }
     }
 

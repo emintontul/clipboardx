@@ -87,7 +87,7 @@ public enum PasteImporter {
             case .put(let r): found.items.insert(r.id)
             case .board(let b): found.boards.insert(b.id)
             case .app(let a): found.apps.insert(a.bundleID)
-            case .delete, .restore, .purge: break
+            case .delete, .restore, .purge, .link: break
             }
         }
         return found

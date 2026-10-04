@@ -13,9 +13,13 @@ final class Preview {
     let fileNames: [String]
     let filePaths: [String]
     let fileImage: NSImage?
+    let linkTitle: String?
+    let linkIcon: NSImage?
+    let linkImage: NSImage?
 
     init(text: String, charCount: Int, image: NSImage?, imageSize: CGSize?, isLink: Bool, fileNames: [String],
-         filePaths: [String] = [], fileImage: NSImage? = nil) {
+         filePaths: [String] = [], fileImage: NSImage? = nil, linkTitle: String? = nil, linkIcon: NSImage? = nil, linkImage: NSImage? = nil) {
+        self.linkTitle = linkTitle; self.linkIcon = linkIcon; self.linkImage = linkImage
         self.text = text; self.charCount = charCount; self.image = image; self.imageSize = imageSize
         self.isLink = isLink; self.fileNames = fileNames; self.filePaths = filePaths; self.fileImage = fileImage
     }
@@ -25,6 +29,7 @@ final class Preview {
 final class PreviewStore {
     static let shared = PreviewStore()
     var engine: LibraryEngine?
+    var linkPreviewsEnabled: () -> Bool = { false }
     private let cache = NSCache<NSString, Preview>()
     private let queue = DispatchQueue(label: "clipboardx.preview", qos: .userInitiated, attributes: .concurrent)
     private let icons = NSCache<NSString, NSImage>()
@@ -37,11 +42,14 @@ final class PreviewStore {
         if let hit = cache.object(forKey: record.id as NSString) { return completion(hit) }
         queue.async { [weak self] in
             guard let self, let engine = self.engine else { return }
-            let preview = Self.build(record, engine: engine)
+            let preview = Self.build(record, engine: engine, enabled: self.linkPreviewsEnabled())
             self.cache.setObject(preview, forKey: record.id as NSString)
             DispatchQueue.main.async { completion(preview) }
         }
     }
+
+    /// Forget cached previews so cards pick up a freshly fetched link title or image.
+    func invalidateAll() { cache.removeAllObjects() }
 
     func icon(bundleID: String?) -> NSImage? {
         guard let bundleID, let engine else { return nil }
@@ -71,7 +79,7 @@ final class PreviewStore {
         return image ?? NSWorkspace.shared.icon(forFile: path)
     }
 
-    private static func build(_ record: ClipRecord, engine: LibraryEngine) -> Preview {
+    private static func build(_ record: ClipRecord, engine: LibraryEngine, enabled: Bool) -> Preview {
         let full = engine.text(of: record)
         let trimmed = full.trimmingCharacters(in: .whitespacesAndNewlines)
         var image: NSImage?
@@ -85,8 +93,14 @@ final class PreviewStore {
         let names = paths.map { ($0 as NSString).lastPathComponent }
         let fileImage = paths.first.flatMap { fileThumbnail(path: $0) }
         let isLink = !trimmed.contains(" ") && !trimmed.contains("\n") && (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://"))
+        var linkTitle: String?, linkIcon: NSImage?, linkImage: NSImage?
+        if isLink, enabled, let link = try? engine.linkRecord(for: trimmed), !link.failed {
+            linkTitle = link.title
+            linkIcon = link.iconBlob.flatMap { engine.linkBlob($0) }.flatMap { NSImage(data: $0) }
+            linkImage = link.imageBlob.flatMap { engine.linkBlob($0) }.flatMap { NSImage(data: $0) }
+        }
         return Preview(text: String(trimmed.prefix(1500)), charCount: full.count, image: image, imageSize: size, isLink: isLink,
-                       fileNames: names, filePaths: paths, fileImage: fileImage)
+                       fileNames: names, filePaths: paths, fileImage: fileImage, linkTitle: linkTitle, linkIcon: linkIcon, linkImage: linkImage)
     }
 
     private static func thumbnail(_ data: Data) -> CGImage? {

@@ -7,6 +7,7 @@ public struct LibraryState {
     public private(set) var deleted: [String: Double] = [:]
     public private(set) var boards: [String: BoardRecord] = [:]
     public private(set) var apps: [String: AppRecord] = [:]
+    public private(set) var links: [String: LinkRecord] = [:]
     private var purged = Set<String>()
 
     public init() {}
@@ -27,6 +28,7 @@ public struct LibraryState {
             records[record.id] = record
         case .board(let board): boards[board.id] = board
         case .app(let app): apps[app.bundleID] = app
+        case .link(let link): links[link.url] = link
         case .delete(let id): if records[id] != nil { deleted[id] = stamped.at }
         case .restore(let id): deleted[id] = nil
         case .purge(let id):

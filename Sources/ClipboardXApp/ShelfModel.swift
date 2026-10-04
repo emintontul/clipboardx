@@ -75,6 +75,8 @@ final class ShelfModel: ObservableObject {
     @Published var datePreset: DatePreset? { didSet { reload(resetSelection: true) } }
     @Published var shelfHeight: CGFloat = 276
     @Published var quickLookID: String?
+    @Published private(set) var linkVersion = 0
+    var linkService: LinkPreviewService?
     @Published private(set) var stack = PasteStack()
     var onStackChanged: ((PasteStack) -> Void)?
     @Published private(set) var appsInUse: [AppRecord] = []
@@ -274,6 +276,12 @@ final class ShelfModel: ObservableObject {
         if wasInStack, !stack.isActive { boardIndex = 0 }
         reload(resetSelection: !(wasInStack && stack.isActive))
         onStackChanged?(stack)
+    }
+
+    /// A link preview arrived: cards reload their previews.
+    func linkPreviewUpdated() {
+        PreviewStore.shared.invalidateAll()
+        linkVersion += 1
     }
 
     // MARK: quick look and copy

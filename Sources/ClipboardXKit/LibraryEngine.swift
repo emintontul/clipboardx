@@ -105,15 +105,17 @@ public final class LibraryEngine {
         guard !recent.isEmpty else { return }
         let events = try EventLog.readAllStamped(directory: logDirectory)
         let state = LibraryState.fold(events)
-        var touched = Set<String>(), boardIDs = Set<String>(), appIDs = Set<String>()
+        var touched = Set<String>(), boardIDs = Set<String>(), appIDs = Set<String>(), linkURLs = Set<String>()
         for stamped in recent {
             switch stamped.event {
             case .put(let r): touched.insert(r.id)
             case .delete(let id), .restore(let id), .purge(let id): touched.insert(id)
             case .board(let b): boardIDs.insert(b.id)
             case .app(let a): appIDs.insert(a.bundleID)
+            case .link(let l): linkURLs.insert(l.url)
             }
         }
+        for url in linkURLs { if let link = state.links[url] { try index.upsertLink(link) } }
         for id in appIDs { if let app = state.apps[id] { try index.upsertApp(app) } }
         for id in boardIDs { if let board = state.boards[id] { try index.upsertBoard(board) } }
         for id in touched {
@@ -328,6 +330,25 @@ public final class LibraryEngine {
     public func iconData(bundleID: String) throws -> Data? {
         try locked { try index.app(bundleID: bundleID)?.iconBlob.flatMap { try? blobs.get($0) } }
     }
+
+    // MARK: link previews
+
+    public func linkRecord(for url: String) throws -> LinkRecord? { try locked { try index.link(url: url) } }
+
+    /// Remembers what a page looked like (or that the lookup failed). Icon and image bytes go to the blob store.
+    @discardableResult
+    public func saveLink(url: String, title: String?, icon: Data?, image: Data?, failed: Bool = false,
+                         now: Double = Date().timeIntervalSince1970) throws -> LinkRecord {
+        try locked {
+            let record = LinkRecord(url: url, title: title, iconBlob: try icon.map { try blobs.put($0) },
+                                    imageBlob: try image.map { try blobs.put($0) }, fetchedAt: now, failed: failed)
+            try log.append(.link(record), at: now); try log.sync()
+            try index.upsertLink(record)
+            return record
+        }
+    }
+
+    public func linkBlob(_ id: String) -> Data? { locked { try? blobs.get(id) } }
 
     // MARK: payloads
 

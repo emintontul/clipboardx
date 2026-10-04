@@ -52,4 +52,11 @@ final class LibraryStateTests: XCTestCase {
         XCTAssertEqual(state.boards["b"]?.name, "New")
         XCTAssertEqual(state.boards["b"]?.deletedAt, 9)
     }
+
+    func testLinkRecordsFoldLatestWins() {
+        let old = LinkRecord(url: "https://a.example", title: "Old", iconBlob: nil, imageBlob: nil, fetchedAt: 1, failed: false)
+        let new = LinkRecord(url: "https://a.example", title: "New", iconBlob: "ab", imageBlob: nil, fetchedAt: 9, failed: false)
+        let state = LibraryState.fold([stamp(.link(new), at: 9), stamp(.link(old), at: 1)])
+        XCTAssertEqual(state.links["https://a.example"]?.title, "New")
+    }
 }

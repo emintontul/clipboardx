@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ClipboardXKit
 import SwiftUI
 
@@ -316,10 +317,18 @@ struct CardView: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { model.selection = card.id; model.pasteSelected(plain: false) }
             .onTapGesture { model.selection = card.id }
-            .onAppear { PreviewStore.shared.load(card.record) { preview = $0 } }
+            .onAppear { loadPreview() }
+            .onReceive(model.$linkVersion.dropFirst()) { _ in loadPreview() }
             .contextMenu { menu }
             .popover(isPresented: Binding(get: { model.renamingID == card.id }, set: { if !$0 { model.renamingID = nil } })) { renamePopover }
             .background { Color.clear.popover(isPresented: Binding(get: { model.editingID == card.id }, set: { if !$0 { model.editingID = nil } })) { editPopover } }
+    }
+
+    private func loadPreview() {
+        PreviewStore.shared.load(card.record) { loaded in
+            preview = loaded
+            if loaded.isLink, model.settings.linkPreviews { model.linkService?.request(loaded.text) }
+        }
     }
 
     // MARK: compact
@@ -404,12 +413,19 @@ struct CardView: View {
             } else if preview.isLink {
                 VStack(spacing: 0) {
                     ZStack {
-                        LinearGradient(colors: [headerColor.opacity(0.38), headerColor.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        Image(systemName: "globe").font(.system(size: 54 * s, weight: .ultraLight)).foregroundStyle(.white.opacity(0.85))
+                        if let image = preview.linkImage {
+                            Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                        } else {
+                            LinearGradient(colors: [headerColor.opacity(0.38), headerColor.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            Image(systemName: "globe").font(.system(size: 54 * s, weight: .ultraLight)).foregroundStyle(.white.opacity(0.85))
+                        }
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(linkHost(preview.text)).font(.system(size: 16 * s, weight: .semibold)).lineLimit(1)
-                        Text(preview.text).font(.system(size: 11 * s)).foregroundStyle(.secondary).lineLimit(2)
+                        Text(preview.linkTitle ?? linkHost(preview.text)).font(.system(size: 16 * s, weight: .semibold)).lineLimit(2)
+                        HStack(spacing: 5) {
+                            if let icon = preview.linkIcon { Image(nsImage: icon).resizable().frame(width: 12 * s, height: 12 * s).clipShape(RoundedRectangle(cornerRadius: 3)) }
+                            Text(preview.linkTitle == nil ? preview.text : linkHost(preview.text)).font(.system(size: 11 * s)).foregroundStyle(.secondary).lineLimit(preview.linkTitle == nil ? 2 : 1)
+                        }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }
             } else {
@@ -451,12 +467,16 @@ struct CardView: View {
                     Text(preview.fileNames.prefix(4).joined(separator: "\n")).font(.system(size: 12))
                 }
             } else if preview.isLink {
-                VStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    Image(systemName: "safari").font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Text(linkHost(preview.text)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text(preview.text).font(.system(size: 9.5)).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 6) {
+                    if let image = preview.linkImage {
+                        Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: .infinity, maxHeight: .infinity).clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Spacer(minLength: 0)
+                        Image(systemName: "safari").font(.system(size: 30, weight: .light)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                        Spacer(minLength: 0)
+                    }
+                    Text(preview.linkTitle ?? linkHost(preview.text)).font(.system(size: 12, weight: .semibold)).lineLimit(preview.linkTitle == nil ? 1 : 2)
+                    Text(preview.linkTitle == nil ? preview.text : linkHost(preview.text)).font(.system(size: 9.5)).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             } else {
                 Text(preview.text.isEmpty ? "(no text)" : preview.text)
