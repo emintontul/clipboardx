@@ -37,6 +37,15 @@ func colorDot(_ code: UInt32?, size: CGFloat = 10) -> Image {
     return Image(nsImage: image)
 }
 
+/// Fills the space it is given with an image, cropping the overflow. The transparent base decides the size, so a tall or wide
+/// image can never push its neighbours (such as a card header) out of place.
+struct FillImage: View {
+    let image: NSImage
+    var body: some View {
+        Color.clear.overlay { Image(nsImage: image).resizable().scaledToFill() }.clipped()
+    }
+}
+
 extension Color {
     /// Paste stores pinboard colors as ARGB integers.
     init(argb: UInt32) {
@@ -395,7 +404,7 @@ struct CardView: View {
         let s = scale
         if let preview {
             if let image = preview.image {
-                Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                FillImage(image: image).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .bottom) {
                         if let size = preview.imageSize {
                             Text("\(Int(size.width)) × \(Int(size.height))").font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
@@ -416,7 +425,7 @@ struct CardView: View {
                 VStack(spacing: 0) {
                     ZStack {
                         if let image = preview.linkImage {
-                            Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                            FillImage(image: image).frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                             LinearGradient(colors: [headerColor.opacity(0.38), headerColor.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
                             Image(systemName: "globe").font(.system(size: 54 * s, weight: .ultraLight)).foregroundStyle(.white.opacity(0.85))
@@ -471,7 +480,7 @@ struct CardView: View {
             } else if preview.isLink {
                 VStack(alignment: .leading, spacing: 6) {
                     if let image = preview.linkImage {
-                        Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: .infinity, maxHeight: .infinity).clipShape(RoundedRectangle(cornerRadius: 8))
+                        FillImage(image: image).frame(maxWidth: .infinity, maxHeight: .infinity).clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
                         Spacer(minLength: 0)
                         Image(systemName: "safari").font(.system(size: 30, weight: .light)).foregroundStyle(.secondary).frame(maxWidth: .infinity)

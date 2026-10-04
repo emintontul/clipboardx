@@ -18,6 +18,27 @@ if args.first == "demo" {
     do { try DemoSeed.run(at: out); exit(0) } catch { fail("error: \(error)") }
 }
 
+if args.first == "trash" {
+    // Moves history clips whose text starts with the given prefix to the trash (restorable). Run it with the app closed.
+    guard let library = option("--library", in: args), let prefix = args.firstIndex(of: "--prefix").map({ args[$0 + 1] }), prefix.count >= 8 else {
+        fail("usage: cx-import trash --library <lib> --prefix <text, at least 8 characters>")
+    }
+    do {
+        let device = ProcessInfo.processInfo.hostName.replacingOccurrences(of: " ", with: "-").lowercased()
+        let engine = try LibraryEngine(library: library, deviceID: device)
+        while engine.isIndexing { Thread.sleep(forTimeInterval: 0.2) }
+        var moved = 0
+        for record in try engine.search(prefix, board: nil, limit: 50) {
+            let text = engine.text(of: record)
+            guard text.hasPrefix(prefix), text.count < 120 else { continue }
+            try engine.delete(record.id)
+            moved += 1
+        }
+        print("moved to trash: \(moved) clip(s) starting with \"\(prefix)\"")
+        exit(0)
+    } catch { fail("error: \(error)") }
+}
+
 if args.first == "sync" {
     guard let library = option("--library", in: args), let shared = option("--shared", in: args), let own = args.firstIndex(of: "--own").map({ args[$0 + 1] }),
           let device = args.firstIndex(of: "--device").map({ args[$0 + 1] }) else { fail("usage: cx-import sync --library <lib> --shared <ClipboardX folder> --own <own folder name> --device <device id>") }

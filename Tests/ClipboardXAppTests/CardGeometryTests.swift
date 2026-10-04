@@ -59,3 +59,49 @@ final class CardGeometryTests: XCTestCase {
         XCTAssertLessThan(rgba(r, x: 1, y: 1).a, 40, "the card's own top corner is rounded, so the very corner pixel is transparent")
     }
 }
+
+/// A tall image placed beside a header must be cropped to its own area and never cover the header.
+@MainActor
+final class FillImageTests: XCTestCase {
+    private func solid(_ color: NSColor, width: Int, height: Int) -> NSImage {
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus(); color.setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill(); image.unlockFocus()
+        return image
+    }
+
+    private func pixel(_ cg: CGImage, x: Int, y: Int) -> (r: Int, g: Int, b: Int) {
+        var px = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let ctx = CGContext(data: &px, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let i = (y * cg.width + x) * 4
+        return (Int(px[i]), Int(px[i + 1]), Int(px[i + 2]))
+    }
+
+    func testTallImageStaysInsideItsAreaAndLeavesTheHeaderAlone() throws {
+        let tall = solid(.red, width: 100, height: 1000)
+        let view = VStack(spacing: 0) {
+            Color.blue.frame(height: 20)
+            FillImage(image: tall).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.frame(width: 100, height: 100)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        let cg = try XCTUnwrap(renderer.cgImage)
+        XCTAssertEqual(pixel(cg, x: 50, y: 10).b, 255, "the header strip is still blue")
+        XCTAssertEqual(pixel(cg, x: 50, y: 10).r, 0, "and the image did not paint over it")
+        XCTAssertGreaterThan(pixel(cg, x: 50, y: 60).r, 200, "the image fills the rest")
+    }
+
+    func testWideImageIsCroppedToo() throws {
+        let wide = solid(.green, width: 1000, height: 100)
+        let view = HStack(spacing: 0) {
+            Color.blue.frame(width: 20)
+            FillImage(image: wide).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.frame(width: 100, height: 100)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        let cg = try XCTUnwrap(renderer.cgImage)
+        XCTAssertEqual(pixel(cg, x: 10, y: 50).b, 255)
+        XCTAssertGreaterThan(pixel(cg, x: 60, y: 50).g, 150)
+    }
+}
