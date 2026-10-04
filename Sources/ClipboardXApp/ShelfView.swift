@@ -305,6 +305,7 @@ struct CardView: View {
     @State private var renameText = ""
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 20, style: .continuous) }
+    private static let headerShape = UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 20, style: .continuous)
 
     var body: some View {
         Group { if model.expanded { expanded } else { compact } }
@@ -376,8 +377,9 @@ struct CardView: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 14).padding(.vertical, 10).frame(height: 66)
-            .background(LinearGradient(colors: [headerColor.opacity(0.98), headerColor.opacity(0.84)], startPoint: .top, endPoint: .bottom))
+            .background { Rectangle().fill(LinearGradient(colors: [headerColor.opacity(0.98), headerColor.opacity(0.84)], startPoint: .top, endPoint: .bottom)) }
             .overlay(alignment: .top) { LinearGradient(colors: [.white.opacity(0.28), .clear], startPoint: .top, endPoint: .bottom).frame(height: 22) }
+            .clipShape(Self.headerShape)   // rounded only where it meets the card's corners; the bottom edge is straight
 
             expandedBody.frame(maxWidth: .infinity, maxHeight: .infinity)
 

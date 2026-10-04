@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         PreviewStore.shared.linkPreviewsEnabled = { [settings] in settings.linkPreviews }
         model = ShelfModel(engine: engine, settings: settings)
         shelf = ShelfController(model: model)
-        let links = LinkPreviewService(engine: engine, fetcher: SystemLinkFetcher(), isEnabled: { [settings] in settings.linkPreviews && env["CLIPBOARDX_DEMO"] != "1" })
+        let links = LinkPreviewService(engine: engine, fetcher: CompositeLinkFetcher(primary: SystemLinkFetcher(), fallback: WebPageLinkFetcher()), isEnabled: { [settings] in settings.linkPreviews && env["CLIPBOARDX_DEMO"] != "1" })
         links.onUpdate = { [weak self] _ in DispatchQueue.main.async { self?.model.linkPreviewUpdated() } }
         model.linkService = links
         model.onPaste = { [weak self] record, plain in self?.paste(record, plain: plain) }

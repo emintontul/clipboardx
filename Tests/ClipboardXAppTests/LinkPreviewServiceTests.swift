@@ -95,3 +95,46 @@ final class LinkPreviewServiceTests: XCTestCase {
         XCTAssertEqual(fetcher.calls.count, 1)
     }
 }
+
+
+private final class StubFetcher: LinkFetching, @unchecked Sendable {
+    let result: Result<FetchedLink, Error>
+    private let lock = NSLock()
+    private var count = 0
+    var calls: Int { lock.lock(); defer { lock.unlock() }; return count }
+    init(_ result: Result<FetchedLink, Error>) { self.result = result }
+    func fetch(_ url: URL) async throws -> FetchedLink {
+        lock.lock(); count += 1; lock.unlock()
+        return try result.get()
+    }
+}
+
+final class CompositeLinkFetcherTests: XCTestCase {
+    private let url = URL(string: "https://swift.org/blog")!
+    private let good = FetchedLink(title: "Fallback title", iconData: nil, imageData: nil)
+
+    func testUsesThePrimaryResultAndSkipsTheFallback() async throws {
+        let primary = StubFetcher(.success(FetchedLink(title: "Primary", iconData: nil, imageData: nil))), fallback = StubFetcher(.success(good))
+        let result = try await CompositeLinkFetcher(primary: primary, fallback: fallback).fetch(url)
+        XCTAssertEqual(result.title, "Primary")
+        XCTAssertEqual(fallback.calls, 0)
+    }
+
+    func testFallsBackWhenThePrimaryThrows() async throws {
+        let primary = StubFetcher(.failure(Boom())), fallback = StubFetcher(.success(good))
+        let result = try await CompositeLinkFetcher(primary: primary, fallback: fallback).fetch(url)
+        XCTAssertEqual(result.title, "Fallback title")
+        XCTAssertEqual(primary.calls, 1)
+    }
+
+    func testFallsBackWhenThePrimaryFindsNothingUseful() async throws {
+        let primary = StubFetcher(.success(FetchedLink(title: nil, iconData: Data([1]), imageData: nil))), fallback = StubFetcher(.success(good))
+        let result = try await CompositeLinkFetcher(primary: primary, fallback: fallback).fetch(url)
+        XCTAssertEqual(result.title, "Fallback title")
+    }
+
+    func testThrowsWhenBothFail() async {
+        let composite = CompositeLinkFetcher(primary: StubFetcher(.failure(Boom())), fallback: StubFetcher(.failure(Boom())))
+        do { _ = try await composite.fetch(url); XCTFail("expected a failure") } catch { XCTAssertTrue(error is Boom) }
+    }
+}

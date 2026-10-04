@@ -170,12 +170,37 @@ public final class LibraryEngine {
             let draft = ClipRecord(id: "cx:" + UUID().uuidString, createdAt: now, copiedAt: now, title: nil,
                                    appBundleID: source?.bundleID, board: nil, boardOrder: nil, rawKind: Self.kind(of: items),
                                    representations: reps, source: "capture")
+            // The same content copied again moves to the top and keeps the fullest set of formats it has been seen with.
             if let existingID = try index.recordID(fingerprint: draft.fingerprint),
                let existing = try index.records(ids: [existingID]).first {
-                return try commit(existing.with(copiedAt: now, appBundleID: source.map { .some($0.bundleID) }, source: "capture"), at: now)
+                return try commit(Self.merged(existing, into: reps, source: source, now: now), at: now)
+            }
+            // One copy can reach the pasteboard in several writes (browsers add formats one after another). Writes of the same
+            // text from the same app within a moment are one clip, not several.
+            if let burst = try burstSibling(items: items, source: source, now: now) {
+                return try commit(Self.merged(burst, into: reps, source: source, now: now), at: now)
             }
             return try commit(draft, at: now)
         }
+    }
+
+    private static let burstWindow = 3.0
+
+    private static func merged(_ existing: ClipRecord, into reps: [Representation], source: SourceApp?, now: Double) -> ClipRecord {
+        existing.with(copiedAt: now, appBundleID: source.map { .some($0.bundleID) },
+                      representations: reps.count > existing.representations.count ? reps : nil, source: "capture")
+    }
+
+    /// A very recent history clip from the same app with the same text, if any.
+    private func burstSibling(items: [PasteboardItem], source: SourceApp?, now: Double) throws -> ClipRecord? {
+        let text = TextExtractor.text(from: items).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        for candidate in try index.recentRecords(scope: .history, limit: 5) {
+            let age = now - candidate.copiedAt
+            guard age >= 0, age <= Self.burstWindow, candidate.appBundleID == source?.bundleID else { continue }
+            if RecordText.text(for: candidate, blobs: blobs).trimmingCharacters(in: .whitespacesAndNewlines) == text { return candidate }
+        }
+        return nil
     }
 
     public func setTitle(_ id: String, to title: String, now: Double = Date().timeIntervalSince1970) throws {

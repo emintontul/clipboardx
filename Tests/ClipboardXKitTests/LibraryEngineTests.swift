@@ -116,6 +116,63 @@ final class LibraryEngineTests: XCTestCase {
         XCTAssertEqual(try engine.recent(board: nil, limit: 10).map(\.id), [rec.id])
     }
 
+    // MARK: one copy, several pasteboard writes
+
+    private let chrome = SourceApp(bundleID: "com.google.Chrome", name: "Chrome", iconPNG: nil)
+    private let link = "https://www.youtube.com/watch?v=1acWMbnxTkE"
+
+    private func link(types: [String]) -> [PasteboardItem] {
+        var data: [String: Data] = [:]
+        for t in types { data[t] = Data(link.utf8) }
+        return [PasteboardItem(types: types, dataByType: data)]
+    }
+
+    func testABurstOfPartialWritesBecomesOneClip() throws {
+        let a = try XCTUnwrap(try engine.capture(items: link(types: ["public.utf8-plain-text"]), source: chrome, now: 100.0))
+        let b = try XCTUnwrap(try engine.capture(items: link(types: ["public.utf8-plain-text", "public.url"]), source: chrome, now: 100.3))
+        let c = try XCTUnwrap(try engine.capture(items: link(types: ["public.utf8-plain-text", "public.url", "org.chromium.source-url"]), source: chrome, now: 100.6))
+        XCTAssertEqual(b.id, a.id)
+        XCTAssertEqual(c.id, a.id)
+        let all = try engine.recent(board: nil, limit: 10)
+        XCTAssertEqual(all.count, 1, "one copy must give one card, not three")
+        XCTAssertEqual(Set(all[0].representations.map(\.uti)), ["public.utf8-plain-text", "public.url", "org.chromium.source-url"], "the fullest version wins")
+        XCTAssertEqual(all[0].copiedAt, 100.6)
+    }
+
+    func testTheFullerEarlierWriteIsNotReplacedByALeanerLaterOne() throws {
+        let full = try XCTUnwrap(try engine.capture(items: link(types: ["public.utf8-plain-text", "public.url"]), source: chrome, now: 100.0))
+        _ = try engine.capture(items: link(types: ["public.utf8-plain-text"]), source: chrome, now: 100.2)
+        let all = try engine.recent(board: nil, limit: 10)
+        XCTAssertEqual(all.map(\.id), [full.id])
+        XCTAssertTrue(all[0].representations.contains { $0.uti == "public.url" })
+    }
+
+    func testTheSameLinkCopiedMuchLaterWithDifferentTypesIsANewClip() throws {
+        _ = try engine.capture(items: link(types: ["public.utf8-plain-text"]), source: chrome, now: 100)
+        _ = try engine.capture(items: link(types: ["public.utf8-plain-text", "public.url"]), source: chrome, now: 200)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10).count, 2)
+    }
+
+    func testTheSameTextFromAnotherAppWithinTheWindowIsNotMerged() throws {
+        _ = try engine.capture(items: link(types: ["public.utf8-plain-text"]), source: chrome, now: 100)
+        _ = try engine.capture(items: link(types: ["public.utf8-plain-text", "public.url"]), source: terminal, now: 100.4)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10).count, 2)
+    }
+
+    func testDifferentTextWithinTheWindowStaysSeparate() throws {
+        _ = try engine.capture(items: textItem("first thing"), source: chrome, now: 100)
+        _ = try engine.capture(items: textItem("second thing"), source: chrome, now: 100.4)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10).count, 2)
+    }
+
+    func testImagesAreNeverMergedByTheTextRule() throws {
+        let png = PasteboardItem(types: ["public.png"], dataByType: ["public.png": Data([1, 2, 3])])
+        let other = PasteboardItem(types: ["public.png"], dataByType: ["public.png": Data([4, 5, 6])])
+        _ = try engine.capture(items: [png], source: chrome, now: 100)
+        _ = try engine.capture(items: [other], source: chrome, now: 100.2)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10).count, 2)
+    }
+
     // MARK: link previews
 
     func testSavedLinkPreviewIsReadBack() throws {
