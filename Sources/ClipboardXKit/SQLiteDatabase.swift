@@ -11,8 +11,11 @@ final class SQLiteDatabase {
 
     private var db: OpaquePointer?
 
-    init(path: URL) throws {
-        guard sqlite3_open_v2(path.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
+    convenience init(path: URL) throws { try self.init(location: path.path) }
+
+    /// `":memory:"` gives a private in-memory database.
+    init(location: String) throws {
+        guard sqlite3_open_v2(location, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             sqlite3_close(db)
             throw DBError.open(message)

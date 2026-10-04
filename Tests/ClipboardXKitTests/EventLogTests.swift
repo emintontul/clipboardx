@@ -48,4 +48,32 @@ final class EventLogTests: XCTestCase {
             guard case EventLog.ReadError.corruptLine = error else { return XCTFail("\(error)") }
         }
     }
+
+    func testAppendStampsTimeAndDevice() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = try EventLog(directory: dir, deviceID: "dev1")
+        try log.append(event("a"), at: 42)
+        let stamped = try EventLog.readAllStamped(directory: dir)
+        XCTAssertEqual(stamped.count, 1)
+        XCTAssertEqual(stamped[0].at, 42)
+        XCTAssertEqual(stamped[0].dev, "dev1")
+    }
+
+    func testLegacyLinesGetDeviceFromFileNameAndFallbackTime() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let legacy = #"{"op":"put","record":{"copiedAt":77,"createdAt":70,"id":"old","rawKind":5,"representations":[],"source":"t"}}"# + "\n"
+        try legacy.write(to: dir.appendingPathComponent("events-olddev-00001.jsonl"), atomically: true, encoding: .utf8)
+        let stamped = try EventLog.readAllStamped(directory: dir)
+        XCTAssertEqual(stamped.first?.dev, "olddev")
+        XCTAssertEqual(stamped.first?.at, 77)
+    }
+
+    func testDeleteRestoreAndPurgeEventsRoundTrip() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = try EventLog(directory: dir, deviceID: "dev1")
+        try log.append(.delete("x"), at: 1); try log.append(.restore("x"), at: 2); try log.append(.purge("x"), at: 3)
+        let events = try EventLog.readAllStamped(directory: dir).map(\.event)
+        XCTAssertEqual(events, [.delete("x"), .restore("x"), .purge("x")])
+    }
 }

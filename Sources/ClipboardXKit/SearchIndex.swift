@@ -9,9 +9,10 @@ public struct SearchDocument: Sendable {
     public let board: String?
     public let boardOrder: Int?
     public let record: ClipRecord?
+    public let deletedAt: Double?
 
     public init(id: String, title: String?, text: String, appName: String?, copiedAt: Double, board: String?,
-                boardOrder: Int? = nil, record: ClipRecord? = nil) {
+                boardOrder: Int? = nil, record: ClipRecord? = nil, deletedAt: Double? = nil) {
         self.id = id
         self.title = title
         self.text = text
@@ -20,6 +21,7 @@ public struct SearchDocument: Sendable {
         self.board = board
         self.boardOrder = boardOrder
         self.record = record
+        self.deletedAt = deletedAt
     }
 }
 
@@ -30,9 +32,10 @@ public struct SearchHit: Equatable, Sendable {
     public let copiedAt: Double
 }
 
-/// Which items a query or listing covers. History is every item that is not on a pinboard.
+/// Which items a query or listing covers. History is every item that is not on a pinboard. Deleted items only appear
+/// in `.trash`.
 public enum SearchScope: Equatable, Sendable {
-    case all, history, board(String)
+    case all, history, board(String), trash
 }
 
 /// Derived, rebuildable index and query model. Compact columns ignore spacing and punctuation so "Togg Lite" finds
@@ -40,15 +43,20 @@ public enum SearchScope: Equatable, Sendable {
 public final class SearchIndex {
     public enum IndexError: Error { case outdated }
 
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
     private static let bodyLimit = 8_000
     private let db: SQLiteDatabase
     private var appNames: Set<String>?
     private let encoder: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]; return e }()
     private let decoder = JSONDecoder()
 
-    public init(path: URL) throws {
-        db = try SQLiteDatabase(path: path)
+    public convenience init(path: URL) throws { try self.init(database: try SQLiteDatabase(path: path)) }
+
+    /// An empty index that lives only in memory. Used as a stand-in while the real one is rebuilt.
+    public convenience init(inMemory: Bool) throws { try self.init(database: try SQLiteDatabase(location: ":memory:")) }
+
+    private init(database: SQLiteDatabase) throws {
+        db = database
         var version = 0, hasDocs = false
         try db.query("PRAGMA user_version") { version = $0.int(0) ?? 0 }
         try db.query("SELECT 1 FROM sqlite_master WHERE name='docs'") { _ in hasDocs = true }
@@ -57,7 +65,7 @@ public final class SearchIndex {
         CREATE TABLE IF NOT EXISTS docs(
           rowid INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, title TEXT, board TEXT, board_order INTEGER, copied REAL NOT NULL,
           title_c TEXT NOT NULL, body_c TEXT NOT NULL, app_c TEXT NOT NULL, title_n TEXT NOT NULL, body_n TEXT NOT NULL,
-          rec TEXT NOT NULL DEFAULT '', fp TEXT)
+          rec TEXT NOT NULL DEFAULT '', fp TEXT, deleted_at REAL)
         """)
         try db.execute("CREATE INDEX IF NOT EXISTS docs_copied ON docs(copied DESC)")
         try db.execute("CREATE INDEX IF NOT EXISTS docs_title ON docs(title_c) WHERE title_c <> ''")
@@ -68,7 +76,7 @@ public final class SearchIndex {
         CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
           title_c, body_c, app_c, title_n, body_n, tokenize='trigram')
         """)
-        try db.execute("CREATE TABLE IF NOT EXISTS boards(id TEXT PRIMARY KEY, name TEXT NOT NULL, idx INTEGER NOT NULL, kind INTEGER NOT NULL, created REAL NOT NULL, attrs TEXT)")
+        try db.execute("CREATE TABLE IF NOT EXISTS boards(id TEXT PRIMARY KEY, name TEXT NOT NULL, idx INTEGER NOT NULL, kind INTEGER NOT NULL, created REAL NOT NULL, attrs TEXT, deleted REAL)")
         try db.execute("CREATE TABLE IF NOT EXISTS apps(bundle TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT)")
         try db.execute("PRAGMA user_version = \(Self.schemaVersion)")
     }
@@ -90,9 +98,9 @@ public final class SearchIndex {
     }
 
     public func upsertBoard(_ board: BoardRecord) throws {
-        try db.execute("INSERT OR REPLACE INTO boards(id,name,idx,kind,created,attrs) VALUES(?,?,?,?,?,?)",
+        try db.execute("INSERT OR REPLACE INTO boards(id,name,idx,kind,created,attrs,deleted) VALUES(?,?,?,?,?,?,?)",
                        [.text(board.id), .text(board.name), .int(board.index), .int(board.kind), .double(board.createdAt),
-                        board.attributesBlob.map(SQLValue.text) ?? .null])
+                        board.attributesBlob.map(SQLValue.text) ?? .null, board.deletedAt.map(SQLValue.double) ?? .null])
     }
 
     public func upsertApp(_ app: AppRecord) throws {
@@ -110,14 +118,45 @@ public final class SearchIndex {
 
     // MARK: reading
 
+    /// Active pinboards in display order. Deleted ones are only reachable through `board(id:)`.
     public func boards() throws -> [BoardRecord] {
         var out: [BoardRecord] = []
-        try db.query("SELECT id,name,idx,kind,created,attrs FROM boards ORDER BY idx, name") { r in
-            out.append(BoardRecord(id: r.text(0) ?? "", name: r.text(1) ?? "", index: r.int(2) ?? 0, kind: r.int(3) ?? 0,
-                                   createdAt: r.double(4) ?? 0, attributesBlob: r.text(5)))
+        try db.query("SELECT id,name,idx,kind,created,attrs,deleted FROM boards WHERE deleted IS NULL ORDER BY idx, name") { r in
+            out.append(Self.board(from: r))
         }
         return out
     }
+
+    public func board(id: String) throws -> BoardRecord? {
+        var out: BoardRecord?
+        try db.query("SELECT id,name,idx,kind,created,attrs,deleted FROM boards WHERE id=?", [.text(id)]) { out = Self.board(from: $0) }
+        return out
+    }
+
+    private static func board(from r: SQLiteReader.Row) -> BoardRecord {
+        BoardRecord(id: r.text(0) ?? "", name: r.text(1) ?? "", index: r.int(2) ?? 0, kind: r.int(3) ?? 0,
+                    createdAt: r.double(4) ?? 0, attributesBlob: r.text(5), deletedAt: r.double(6))
+    }
+
+    public func setDeleted(id: String, at: Double?) throws {
+        try db.execute("UPDATE docs SET deleted_at=? WHERE id=?", [at.map(SQLValue.double) ?? .null, .text(id)])
+    }
+
+    public func deletedAt(id: String) throws -> Double? {
+        var value: Double?
+        try db.query("SELECT deleted_at FROM docs WHERE id=?", [.text(id)]) { value = $0.double(0) }
+        return value
+    }
+
+    /// Ids of trashed clips deleted before `cutoff` (seconds since 1970).
+    public func expiredTrashIDs(before cutoff: Double) throws -> [String] {
+        var ids: [String] = []
+        try db.query("SELECT id FROM docs WHERE deleted_at IS NOT NULL AND deleted_at < ?", [.double(cutoff)]) { ids.append($0.text(0) ?? "") }
+        return ids
+    }
+
+    /// Removes a clip from the index for good. The event log keeps the purge event; blobs are never deleted.
+    public func removeDocument(id: String) throws { try db.transaction { try remove(id: id) } }
 
     public func app(bundleID: String) throws -> AppRecord? {
         var out: AppRecord?
@@ -129,13 +168,13 @@ public final class SearchIndex {
 
     public func nextBoardOrder(_ board: String) throws -> Int {
         var n = 0
-        try db.query("SELECT COALESCE(MAX(board_order)+1,0) FROM docs WHERE board=?", [.text(board)]) { n = $0.int(0) ?? 0 }
+        try db.query("SELECT COALESCE(MAX(board_order)+1,0) FROM docs WHERE board=? AND deleted_at IS NULL", [.text(board)]) { n = $0.int(0) ?? 0 }
         return n
     }
 
     public func recordID(fingerprint: String) throws -> String? {
         var id: String?
-        try db.query("SELECT id FROM docs WHERE fp=? AND board IS NULL ORDER BY copied DESC LIMIT 1", [.text(fingerprint)]) { id = $0.text(0) }
+        try db.query("SELECT id FROM docs WHERE fp=? AND board IS NULL AND deleted_at IS NULL ORDER BY copied DESC LIMIT 1", [.text(fingerprint)]) { id = $0.text(0) }
         return id
     }
 
@@ -152,7 +191,11 @@ public final class SearchIndex {
     public func recentRecords(scope: SearchScope, limit: Int, offset: Int = 0) throws -> [ClipRecord] {
         let (clause, params) = Self.clause(scope)
         let order: String
-        if case .board = scope { order = "COALESCE(d.board_order, 1000000), d.copied DESC" } else { order = "d.copied DESC" }
+        switch scope {
+        case .board: order = "COALESCE(d.board_order, 1000000), d.copied DESC"
+        case .trash: order = "d.deleted_at DESC"
+        default: order = "d.copied DESC"
+        }
         var ids: [String] = []
         try db.query("SELECT d.id FROM docs d WHERE 1=1 \(clause) ORDER BY \(order) LIMIT ? OFFSET ?",
                      params + [.int(limit), .int(offset)]) { ids.append($0.text(0) ?? "") }
@@ -185,10 +228,12 @@ public final class SearchIndex {
         let bodyN = TextNormalizer.fold(body)
         let json = (try? doc.record.map { String(decoding: try encoder.encode($0), as: UTF8.self) }) ?? nil
         try db.execute("""
-        INSERT INTO docs(id,title,board,board_order,copied,title_c,body_c,app_c,title_n,body_n,rec,fp) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO docs(id,title,board,board_order,copied,title_c,body_c,app_c,title_n,body_n,rec,fp,deleted_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, [.text(doc.id), doc.title.map(SQLValue.text) ?? .null, doc.board.map(SQLValue.text) ?? .null,
               doc.boardOrder.map(SQLValue.int) ?? .null, .double(doc.copiedAt), .text(titleC), .text(bodyC), .text(appC),
-              .text(titleN), .text(bodyN), .text(json ?? ""), doc.record.map { .text($0.fingerprint) } ?? .null])
+              .text(titleN), .text(bodyN), .text(json ?? ""), doc.record.map { .text($0.fingerprint) } ?? .null,
+              doc.deletedAt.map(SQLValue.double) ?? .null])
         if !appC.isEmpty { appNames?.insert(appC) }
         var rowid = 0
         try db.query("SELECT rowid FROM docs WHERE id=?", [.text(doc.id)]) { rowid = $0.int(0) ?? 0 }
@@ -213,9 +258,10 @@ public final class SearchIndex {
 
     private static func clause(_ scope: SearchScope) -> (String, [SQLValue]) {
         switch scope {
-        case .all: return ("", [])
-        case .history: return (" AND d.board IS NULL", [])
-        case .board(let id): return (" AND d.board = ?", [.text(id)])
+        case .all: return (" AND d.deleted_at IS NULL", [])
+        case .history: return (" AND d.board IS NULL AND d.deleted_at IS NULL", [])
+        case .board(let id): return (" AND d.board = ? AND d.deleted_at IS NULL", [.text(id)])
+        case .trash: return (" AND d.deleted_at IS NOT NULL", [])
         }
     }
 

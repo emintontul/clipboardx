@@ -57,11 +57,13 @@ public struct ClipRecord: Codable, Equatable, Sendable {
     }
 
     public func with(id: String? = nil, copiedAt: Double? = nil, title: String?? = nil, appBundleID: String?? = nil,
-                     board: String?? = nil, boardOrder: Int?? = nil, source: String? = nil) -> ClipRecord {
+                     board: String?? = nil, boardOrder: Int?? = nil, representations: [Representation]? = nil,
+                     source: String? = nil) -> ClipRecord {
         ClipRecord(id: id ?? self.id, createdAt: createdAt, copiedAt: copiedAt ?? self.copiedAt,
                    title: title ?? self.title, appBundleID: appBundleID ?? self.appBundleID,
                    board: board ?? self.board, boardOrder: boardOrder ?? self.boardOrder, rawKind: rawKind,
-                   representations: representations, source: source ?? self.source, flags: flags, rawBlob: rawBlob, previewBlob: previewBlob)
+                   representations: representations ?? self.representations, source: source ?? self.source, flags: flags,
+                   rawBlob: rawBlob, previewBlob: previewBlob)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -94,14 +96,21 @@ public struct BoardRecord: Codable, Equatable, Sendable {
     public let kind: Int
     public let createdAt: Double
     public let attributesBlob: String?
+    public let deletedAt: Double?
 
-    public init(id: String, name: String, index: Int, kind: Int, createdAt: Double, attributesBlob: String?) {
+    public init(id: String, name: String, index: Int, kind: Int, createdAt: Double, attributesBlob: String?, deletedAt: Double? = nil) {
         self.id = id
         self.name = name
         self.index = index
         self.kind = kind
         self.createdAt = createdAt
         self.attributesBlob = attributesBlob
+        self.deletedAt = deletedAt
+    }
+
+    public func with(name: String? = nil, index: Int? = nil, attributesBlob: String?? = nil, deletedAt: Double?? = nil) -> BoardRecord {
+        BoardRecord(id: id, name: name ?? self.name, index: index ?? self.index, kind: kind, createdAt: createdAt,
+                    attributesBlob: attributesBlob ?? self.attributesBlob, deletedAt: deletedAt ?? self.deletedAt)
     }
 }
 
@@ -122,8 +131,11 @@ public enum ClipEvent: Codable, Equatable, Sendable {
     case put(ClipRecord)
     case board(BoardRecord)
     case app(AppRecord)
+    case delete(String)
+    case restore(String)
+    case purge(String)
 
-    private enum Keys: String, CodingKey { case op, record }
+    private enum Keys: String, CodingKey { case op, record, id }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -131,6 +143,9 @@ public enum ClipEvent: Codable, Equatable, Sendable {
         case "put": self = .put(try c.decode(ClipRecord.self, forKey: .record))
         case "board": self = .board(try c.decode(BoardRecord.self, forKey: .record))
         case "app": self = .app(try c.decode(AppRecord.self, forKey: .record))
+        case "delete": self = .delete(try c.decode(String.self, forKey: .id))
+        case "restore": self = .restore(try c.decode(String.self, forKey: .id))
+        case "purge": self = .purge(try c.decode(String.self, forKey: .id))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .op, in: c, debugDescription: "unknown op \(other)")
         }
@@ -142,6 +157,22 @@ public enum ClipEvent: Codable, Equatable, Sendable {
         case .put(let r): try c.encode("put", forKey: .op); try c.encode(r, forKey: .record)
         case .board(let r): try c.encode("board", forKey: .op); try c.encode(r, forKey: .record)
         case .app(let r): try c.encode("app", forKey: .op); try c.encode(r, forKey: .record)
+        case .delete(let id): try c.encode("delete", forKey: .op); try c.encode(id, forKey: .id)
+        case .restore(let id): try c.encode("restore", forKey: .op); try c.encode(id, forKey: .id)
+        case .purge(let id): try c.encode("purge", forKey: .op); try c.encode(id, forKey: .id)
         }
+    }
+}
+
+/// An event with the time and device that wrote it. Replay orders by `(at, dev)`, so devices converge on the same state.
+public struct StampedEvent: Equatable, Sendable {
+    public let event: ClipEvent
+    public let at: Double
+    public let dev: String
+
+    public init(event: ClipEvent, at: Double, dev: String) {
+        self.event = event
+        self.at = at
+        self.dev = dev
     }
 }
