@@ -52,6 +52,7 @@ extension ClipKind {
 final class ShelfModel: ObservableObject {
     static let historyID = "sharedPasteboardHistory"
     static let trashID = LibraryEngine.trashBoardID
+    static let stackID = "stack"
     let engine: LibraryEngine
     let settings: AppSettings
     @Published var query = "" { didSet { if query != oldValue { reload(resetSelection: true) } } }
@@ -74,6 +75,8 @@ final class ShelfModel: ObservableObject {
     @Published var datePreset: DatePreset? { didSet { reload(resetSelection: true) } }
     @Published var shelfHeight: CGFloat = 276
     @Published var quickLookID: String?
+    @Published private(set) var stack = PasteStack()
+    var onStackChanged: ((PasteStack) -> Void)?
     @Published private(set) var appsInUse: [AppRecord] = []
     private var limit = 60
     private var indexTimer: Timer?
@@ -100,6 +103,7 @@ final class ShelfModel: ObservableObject {
 
     var currentBoard: BoardRecord? { boards.indices.contains(boardIndex) ? boards[boardIndex] : nil }
     var inTrash: Bool { currentBoard?.id == Self.trashID }
+    var inStack: Bool { currentBoard?.id == Self.stackID }
 
     /// While the index is rebuilt in the background the shelf shows progress, then fills itself in.
     private func watchIndexing() {
@@ -121,6 +125,9 @@ final class ShelfModel: ObservableObject {
         var list = (try? engine.boards()) ?? []
         if !list.contains(where: { $0.id == Self.historyID }) {
             list.insert(BoardRecord(id: Self.historyID, name: "Clipboard History", index: -1, kind: 1, createdAt: 0, attributesBlob: nil), at: 0)
+        }
+        if stack.isActive {
+            list.insert(BoardRecord(id: Self.stackID, name: "Paste Stack", index: -1, kind: 4, createdAt: 0, attributesBlob: nil), at: 1)
         }
         list.append(BoardRecord(id: Self.trashID, name: "Recently Deleted", index: Int.max, kind: 3, createdAt: 0, attributesBlob: nil))
         boards = list
@@ -157,7 +164,9 @@ final class ShelfModel: ObservableObject {
         let board = currentBoard?.id
         let (text, f) = effective()
         let records: [ClipRecord]
-        if text.trimmingCharacters(in: .whitespaces).isEmpty {
+        if board == Self.stackID {
+            records = (try? engine.records(ids: stack.ids)) ?? []
+        } else if text.trimmingCharacters(in: .whitespaces).isEmpty {
             records = (try? engine.recent(board: board, limit: limit, filters: f)) ?? []
         } else {
             records = (try? engine.search(text, board: board, limit: limit, filters: f)) ?? []
@@ -236,6 +245,36 @@ final class ShelfModel: ObservableObject {
     }
 
     func refreshApps() { appsInUse = (try? engine.appsInUse()) ?? [] }
+
+    // MARK: paste stack
+
+    func toggleStack() {
+        if stack.isActive { stack.stop() } else { stack.start() }
+        stackDidChange()
+        if stack.isActive, let index = boards.firstIndex(where: { $0.id == Self.stackID }) { selectBoard(index) }
+    }
+
+    /// Called for every new copy: while the stack is active it joins the end of the queue.
+    func enqueueToStack(_ id: String) {
+        guard stack.isActive else { return }
+        stack.enqueue(id)
+        stackDidChange()
+    }
+
+    /// After a paste from the Paste Stack view, that clip leaves the queue.
+    func didPaste(_ record: ClipRecord) {
+        guard inStack else { return }
+        stack.remove(record.id)
+        stackDidChange()
+    }
+
+    private func stackDidChange() {
+        let wasInStack = inStack
+        refreshBoards()
+        if wasInStack, !stack.isActive { boardIndex = 0 }
+        reload(resetSelection: !(wasInStack && stack.isActive))
+        onStackChanged?(stack)
+    }
 
     // MARK: quick look and copy
 
@@ -358,6 +397,7 @@ final class ShelfModel: ObservableObject {
         quickLookID = nil
         kindFilters = []; appFilter = nil; datePreset = nil
         refreshBoards()
+        if stack.isActive, let index = boards.firstIndex(where: { $0.id == Self.stackID }) { boardIndex = index }
         refreshApps()
         reload(resetSelection: true)
     }

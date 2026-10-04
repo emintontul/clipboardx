@@ -9,14 +9,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var shelf: ShelfController!
     private var monitor: PasteboardMonitor!
     private var backup: BackupScheduler!
-    private var hotKey: HotKey?
+    private let hotKeys = HotKeyCenter()
+    private var stackItem: NSMenuItem!
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var backdrop: NSWindow?
     private let settings = AppSettings.shared
     private var backupItem: NSMenuItem!
     private var countItem: NSMenuItem!
-    private var shortcutLabel = "⇧⌘V"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -55,13 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if env["CLIPBOARDX_DEMO_BACKDROP"] == "1" { showBackdrop() }
         if !demo { schedulePurge() }
 
-        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey), id: 1) { [weak self] in self?.shelf.toggle() }
-        if hotKey == nil {
-            // Paste owns ⇧⌘V while it runs; fall back to ⌥⌘V so both can coexist during the switch-over.
-            hotKey = HotKey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | optionKey), id: 2) { [weak self] in self?.shelf.toggle() }
-            shortcutLabel = "⌥⌘V"
-            statusItem.menu?.items.first?.title = "Show Clipboard    ⌥⌘V"
-        }
+        hotKeys.onChange = { [weak self] in self?.refreshShortcutLabels() }
+        hotKeys.register(.showShelf) { [weak self] in self?.shelf.toggle() }
+        hotKeys.register(.pasteStack) { [weak self] in self?.model.toggleStack() }
+        monitor.onCapture = { [weak self] record in self?.model.enqueueToStack(record.id) }
+        model.onStackChanged = { [weak self] stack in self?.stackChanged(stack) }
 
         if env["CLIPBOARDX_DEMO"] == "1" {
             let query = env["CLIPBOARDX_DEMO_QUERY"]
@@ -111,8 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let items = try? engine.payload(of: record) else { return }
         shelf.hide()
         if settings.soundEffects { NSSound(named: "Pop")?.play() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [settings] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, settings] in
+            guard let self else { return }
             PasteAction.perform(items: items, plainText: plain, autoPaste: settings.pasteToActiveApp)
+            self.model.didPaste(record)
         }
     }
 
@@ -123,6 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.addItem(withTitle: "Show Clipboard", action: #selector(showShelf), keyEquivalent: "").target = self
         menu.items.last?.title = "Show Clipboard    ⇧⌘V"
+        stackItem = NSMenuItem(title: "Start Paste Stack", action: #selector(toggleStackAction), keyEquivalent: "")
+        stackItem.target = self
+        menu.addItem(stackItem)
         menu.addItem(.separator())
         countItem = NSMenuItem(title: "Library: loading…", action: nil, keyEquivalent: "")
         menu.addItem(countItem)
@@ -143,6 +146,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showShelf() { shelf.show() }
+    @objc private func toggleStackAction() { model.toggleStack() }
+
+    private func refreshShortcutLabels() {
+        let show = hotKeys.effective[.showShelf]?.display ?? "(none)"
+        statusItem.menu?.items.first?.title = "Show Clipboard    \(show)"
+        let stack = hotKeys.effective[.pasteStack]?.display ?? ""
+        stackItem?.title = (model?.stack.isActive == true ? "End Paste Stack" : "Start Paste Stack") + (stack.isEmpty ? "" : "    \(stack)")
+    }
+
+    private func stackChanged(_ stack: PasteStack) {
+        statusItem.button?.title = stack.isActive ? " \(stack.ids.count)" : ""
+        statusItem.button?.imagePosition = stack.isActive ? .imageLeft : .imageOnly
+        statusItem.button?.image = NSImage(systemSymbolName: stack.isActive ? "square.stack.3d.up.fill" : "doc.on.clipboard", accessibilityDescription: "ClipboardX")
+        refreshShortcutLabels()
+        if settings.soundEffects { NSSound(named: stack.isActive ? "Glass" : "Pop")?.play() }
+    }
     @objc private func backupNow() { backup.runNow() }
     @objc private func openSettingsAction() { openSettings() }
 

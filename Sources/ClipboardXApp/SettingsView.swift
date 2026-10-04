@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardXKit
 import SwiftUI
 
 private enum Pane: String, CaseIterable, Identifiable {
@@ -15,6 +16,7 @@ struct SettingsView: View {
     let backupNow: () -> Void
     let libraryPath: String
     @State private var pane: Pane = .general
+    @StateObject private var recorder = ShortcutRecorder()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -102,14 +104,40 @@ struct SettingsView: View {
     }
 
     private var shortcuts: some View {
-        card {
-            row("Show ClipboardX", "⇧⌘V")
-            row("Next / previous pinboard", "⌘→  ⌘←")
-            row("Quick paste", "⌘1 … ⌘9")
-            row("Paste selected", "Return")
-            row("Plain text mode", "⇧ with Return or ⌘1…9")
-            row("Close", "Esc")
+        VStack(alignment: .leading, spacing: 18) {
+            card {
+                ForEach(ShortcutAction.allCases, id: \.self) { action in
+                    HStack {
+                        Text(action.title)
+                        Spacer()
+                        Button { recorder.begin(action) } label: {
+                            Text(recorder.recording == action ? "Press shortcut…" : ShortcutStore.shared.shortcut(for: action).display)
+                                .font(.system(.body, design: .monospaced)).frame(minWidth: 96)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(recorder.recording == action ? .accentColor : nil)
+                    }
+                }
+                if let message = recorder.message { Text(message).font(.caption).foregroundStyle(.orange) }
+                HStack {
+                    Text("Click a shortcut, then press the new keys. Esc cancels.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reset to defaults") { ShortcutStore.shared.resetAll(); recorder.message = nil }
+                }
+            }
+            Text("Fixed shortcuts").font(.headline)
+            card {
+                row("Quick paste", "⌘1 … ⌘9")
+                row("Paste selected", "Return")
+                row("Plain text mode", "⇧ with Return or ⌘1…9")
+                row("Quick Look", "Space")
+                row("Delete clip", "⌘⌫")
+                row("Edit text", "⌘E")
+                row("Close", "Esc")
+            }
         }
+        .onReceive(NotificationCenter.default.publisher(for: ShortcutStore.didChange)) { _ in recorder.objectWillChange.send() }
+        .onDisappear { recorder.stop() }
     }
 
     private func row(_ title: String, _ keys: String) -> some View {
@@ -129,5 +157,41 @@ struct SettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url, let bundle = Bundle(url: url)?.bundleIdentifier else { return }
         let id = bundle.lowercased()
         if !settings.ignoredApps.contains(id) { settings.ignoredApps.append(id) }
+    }
+}
+
+/// Captures the next key combination and stores it for an action, explaining why when it cannot be used.
+final class ShortcutRecorder: ObservableObject {
+    @Published var recording: ShortcutAction?
+    @Published var message: String?
+    private var monitor: Any?
+
+    func begin(_ action: ShortcutAction) {
+        stop()
+        recording = action
+        message = nil
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in self?.capture(event); return nil }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recording = nil
+    }
+
+    private func capture(_ event: NSEvent) {
+        guard let action = recording else { return }
+        if event.keyCode == 53 { stop(); return }
+        let shortcut = Shortcut(keyCode: UInt32(event.keyCode), modifiers: Shortcut.carbonModifiers(event.modifierFlags))
+        do {
+            try ShortcutStore.shared.set(shortcut, for: action)
+            stop()
+        } catch ShortcutStore.SetError.needsModifier {
+            message = "Add ⌘, ⌥ or ⌃ so it does not get in the way of typing."
+        } catch ShortcutStore.SetError.conflict(let other) {
+            message = "\(shortcut.display) is already used by “\(other.title)”."
+        } catch {
+            message = "Could not save that shortcut."
+        }
     }
 }

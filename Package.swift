@@ -14,5 +14,6 @@ let package = Package(
         .executableTarget(name: "cx-import", dependencies: ["ClipboardXKit"]),
         .executableTarget(name: "ClipboardXApp", dependencies: ["ClipboardXKit"]),
         .testTarget(name: "ClipboardXKitTests", dependencies: ["ClipboardXKit"]),
+        .testTarget(name: "ClipboardXAppTests", dependencies: ["ClipboardXApp", "ClipboardXKit"]),
     ]
 )

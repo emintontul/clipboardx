@@ -228,10 +228,13 @@ struct ShelfView: View {
                     Image(systemName: "clock").font(.system(size: 11, weight: .medium))
                 } else if board.id == ShelfModel.trashID {
                     Image(systemName: "trash").font(.system(size: 11, weight: .medium))
+                } else if board.id == ShelfModel.stackID {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 11, weight: .medium))
                 } else {
                     Circle().fill(model.boardColors[board.id].map { Color(argb: $0) } ?? Color.gray).frame(width: 9, height: 9)
                 }
-                Text(board.name).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                Text(board.id == ShelfModel.stackID ? "Paste Stack · \(model.stack.ids.count)" : board.name)
+                    .font(.system(size: 12.5, weight: .medium)).lineLimit(1)
             }
             .padding(.horizontal, 11).padding(.vertical, 5)
             .background(selected ? Color.white.opacity(0.16) : Color.clear, in: Capsule())
@@ -249,7 +252,9 @@ struct ShelfView: View {
     }
 
     @ViewBuilder private func boardMenu(_ board: BoardRecord) -> some View {
-        if board.id != ShelfModel.historyID, board.id != ShelfModel.trashID {
+        if board.id == ShelfModel.stackID {
+            Button("End Paste Stack") { model.toggleStack() }
+        } else if board.id != ShelfModel.historyID, board.id != ShelfModel.trashID {
             Button("Rename…") { boardRenameText = board.name; model.renamingBoardID = board.id }
             Menu("Color") {
                 ForEach(BoardPalette.colors, id: \.code) { color in
@@ -515,7 +520,7 @@ struct CardView: View {
             if model.canEdit(card.record) { Button("Edit…") { model.beginEdit(card.id) } }
             Button("Rename…") { renameText = card.record.title ?? ""; model.renamingID = card.id }
             Menu("Pin to") {
-                ForEach(model.boards.filter { $0.id != ShelfModel.historyID && $0.id != ShelfModel.trashID }, id: \.id) { board in
+                ForEach(model.boards.filter { $0.id != ShelfModel.historyID && $0.id != ShelfModel.trashID && $0.id != ShelfModel.stackID }, id: \.id) { board in
                     Button { model.pin(card.id, to: board) } label: {
                         Label { Text(board.name) } icon: { colorDot(model.boardColors[board.id]) }
                     }

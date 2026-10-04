@@ -10,7 +10,7 @@ final class PasteboardMonitor {
     private var timer: Timer?
     private var registeredApps = Set<String>()
     private static let maxPayload = 256 * 1024 * 1024
-    var onCapture: (() -> Void)?
+    var onCapture: ((ClipRecord) -> Void)?
 
     init(engine: LibraryEngine, settings: AppSettings) {
         self.engine = engine
@@ -48,8 +48,8 @@ final class PasteboardMonitor {
         }
         queue.async { [engine, onCapture] in
             do {
-                if try engine.capture(items: items, source: source) != nil {
-                    DispatchQueue.main.async { onCapture?() }
+                if let record = try engine.capture(items: items, source: source) {
+                    DispatchQueue.main.async { onCapture?(record) }
                 }
             } catch { NSLog("ClipboardX: capture failed: \(error)") }
         }

@@ -153,12 +153,16 @@ final class ShelfController {
         guard panel.isKeyWindow || quickLookPanel?.isKeyWindow == true else { return event }
         let command = event.modifierFlags.contains(.command)
         let shift = event.modifierFlags.contains(.shift)
+        let carbon = Shortcut.carbonModifiers(event.modifierFlags)
+        let store = ShortcutStore.shared
+        if store.matches(keyCode: UInt32(event.keyCode), modifiers: carbon, action: .nextBoard) { consumedKeys.insert(event.keyCode); model.switchBoard(by: 1); return nil }
+        if store.matches(keyCode: UInt32(event.keyCode), modifiers: carbon, action: .previousBoard) { consumedKeys.insert(event.keyCode); model.switchBoard(by: -1); return nil }
         switch event.keyCode {
         case 53: consumedKeys.insert(event.keyCode); if !model.closeQuickLook() { hide() }; return nil
         case 49 where model.query.isEmpty: consumedKeys.insert(event.keyCode); model.toggleQuickLook(); return nil
         case 51 where !command && model.query.isEmpty && model.hasFilters: consumedKeys.insert(event.keyCode); _ = model.removeLastFilter(); return nil
-        case 123: consumedKeys.insert(event.keyCode); command ? model.switchBoard(by: -1) : model.move(-1); return nil
-        case 124: consumedKeys.insert(event.keyCode); command ? model.switchBoard(by: 1) : model.move(1); return nil
+        case 123 where !command: consumedKeys.insert(event.keyCode); model.move(-1); return nil
+        case 124 where !command: consumedKeys.insert(event.keyCode); model.move(1); return nil
         case 36, 76: consumedKeys.insert(event.keyCode); model.pasteSelected(plain: shift); return nil
         case 51, 117 where command: consumedKeys.insert(event.keyCode); model.deleteSelected(); return nil
         case 14 where command: consumedKeys.insert(event.keyCode); model.editSelected(); return nil
