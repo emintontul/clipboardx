@@ -1,0 +1,8 @@
+.build/
+*.sqlite
+*.sqlite-*
+_EXTERNAL_DATA/
+.DS_Store
+build/
+*.app
+*.profdata
