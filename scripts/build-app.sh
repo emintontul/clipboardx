@@ -1,9 +1,10 @@
 #!/bin/zsh
-# Builds ClipboardX.app into ./build and signs it. Set SIGN_IDENTITY to a certificate hash/name (default: ad-hoc).
+# Builds ClipboardX.app (default: ./build) and signs it. SIGN_IDENTITY: certificate hash/name (default: ad-hoc).
+# APP_DIR overrides the output bundle path.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 swift build -c release --product ClipboardX
-APP="build/ClipboardX.app"
+APP="${APP_DIR:-build/ClipboardX.app}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/ClipboardX "$APP/Contents/MacOS/ClipboardX"

@@ -6,3 +6,4 @@ _EXTERNAL_DATA/
 build/
 *.app
 *.profdata
+dist/
