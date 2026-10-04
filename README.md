@@ -14,6 +14,12 @@ Searching `Stag ing` finds the clip named `Staging server` (spacing is ignored):
 <sub>Screenshots use a made-up sample library, not real clipboard data. You can generate it yourself with
 `swift run cx-import demo --out <empty folder>`.</sub>
 
+## Download
+
+Grab the latest `.dmg` from the [Releases page](https://github.com/emintontul/clipboardx/releases/latest), open it and drag
+ClipboardX into Applications. Apple Silicon, macOS 14 or later. The app is not notarized yet, so the first launch needs
+**System Settings → Privacy & Security → Open Anyway** (details are in the release notes).
+
 ## Why
 
 - **Search that finds what you meant.** Typing `Togg Lite` finds a clip titled `ToggLite`. Spacing, punctuation, case,
@@ -87,6 +93,10 @@ Take the snapshot with `sqlite3 "file:<db>?mode=ro" "VACUUM INTO '<snapshot.sqli
 
 ClipboardX is an independent project. It is not affiliated with, endorsed by, or derived from the source code of any
 other clipboard manager. Product names mentioned belong to their owners.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Open issues include a roadmap and good first issues.
 
 ## License
 

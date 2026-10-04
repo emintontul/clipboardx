@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please do not paste real clipboard content, passwords or private screenshots here.** Use made-up text.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: ClipboardX version
+      placeholder: "0.1.1"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
+      placeholder: "macOS 26.0, Apple M2"
+    validations:
+      required: true
+  - type: dropdown
+    id: other
+    attributes:
+      label: Is another clipboard manager running at the same time?
+      options: ["No", "Yes", "Not sure"]
+    validations:
+      required: true
