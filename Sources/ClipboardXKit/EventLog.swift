@@ -81,39 +81,57 @@ public final class EventLog {
         try readAllStamped(directory: directory, after: [:])
     }
 
+    /// Every segment, own and (under `remote/<device>/`) copies of other devices' logs, keyed by relative path.
+    private static func segmentFiles(in directory: URL) -> [(key: String, url: URL, device: String)] {
+        let fm = FileManager.default
+        var out: [(String, URL, String)] = []
+        for name in (try? fm.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasSuffix(".jsonl") {
+            out.append((name, directory.appendingPathComponent(name), device(fromFileName: name)))
+        }
+        let remote = directory.appendingPathComponent("remote", isDirectory: true)
+        for folder in (try? fm.contentsOfDirectory(atPath: remote.path)) ?? [] {
+            let dir = remote.appendingPathComponent(folder, isDirectory: true)
+            for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where name.hasSuffix(".jsonl") {
+                out.append(("remote/\(folder)/\(name)", dir.appendingPathComponent(name), device(fromFileName: name)))
+            }
+        }
+        return out.sorted { $0.0 < $1.0 }.map { (key: $0.0, url: $0.1, device: $0.2) }
+    }
+
     /// Byte size of every segment right now. Pair with `readAllStamped(directory:after:)` to read only what was added later.
     public static func fileSizes(directory: URL) -> [String: Int] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         var sizes: [String: Int] = [:]
-        for name in names where name.hasSuffix(".jsonl") {
-            sizes[name] = (try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent(name).path)[.size] as? Int) ?? 0
+        for file in segmentFiles(in: directory) {
+            sizes[file.key] = (try? FileManager.default.attributesOfItem(atPath: file.url.path)[.size] as? Int) ?? 0
         }
         return sizes
     }
 
     /// Events past the given per-file byte offsets (a file missing from `offsets` is read from the start).
     public static func readAllStamped(directory: URL, after offsets: [String: Int]) throws -> [StampedEvent] {
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "jsonl" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let decoder = JSONDecoder()
         var events: [StampedEvent] = []
-        for file in files {
-            let fileDevice = device(fromFileName: file.lastPathComponent)
-            let data = try Data(contentsOf: file)
-            let start = min(offsets[file.lastPathComponent] ?? 0, data.count)
+        for file in segmentFiles(in: directory) {
+            let data = try Data(contentsOf: file.url)
+            let start = min(offsets[file.key] ?? 0, data.count)
             let lines = data.dropFirst(start).split(separator: 0x0A, omittingEmptySubsequences: true)
             for (index, line) in lines.enumerated() {
                 guard let decoded = try? decoder.decode(DecodedLine.self, from: Data(line)) else {
-                    throw ReadError.corruptLine(file: file.lastPathComponent, line: index + 1)
+                    throw ReadError.corruptLine(file: file.key, line: index + 1)
                 }
-                events.append(StampedEvent(event: decoded.event, at: decoded.at ?? fallbackTime(decoded.event), dev: decoded.dev ?? fileDevice))
+                events.append(StampedEvent(event: decoded.event, at: decoded.at ?? fallbackTime(decoded.event), dev: decoded.dev ?? file.device))
             }
         }
         return events
     }
 
-    private static func device(fromFileName name: String) -> String {
+    /// Decodes one log line, or nil when it is not a complete valid event.
+    static func decodeStamped(_ line: Data, device: String) -> StampedEvent? {
+        guard let decoded = try? JSONDecoder().decode(DecodedLine.self, from: line) else { return nil }
+        return StampedEvent(event: decoded.event, at: decoded.at ?? fallbackTime(decoded.event), dev: decoded.dev ?? device)
+    }
+
+    static func device(fromFileName name: String) -> String {
         guard name.hasPrefix("events-"), let dash = name.lastIndex(of: "-"), dash > name.index(name.startIndex, offsetBy: 7) else { return "unknown" }
         return String(name[name.index(name.startIndex, offsetBy: 7)..<dash])
     }

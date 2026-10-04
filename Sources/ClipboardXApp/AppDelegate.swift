@@ -50,7 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Demo mode (screenshots) never records the real clipboard and never writes to the iCloud backup.
         let demo = env["CLIPBOARDX_DEMO"] == "1"
         monitor = PasteboardMonitor(engine: engine, settings: settings)
-        backup = BackupScheduler(library: library, deviceID: device, settings: settings)
+        backup = BackupScheduler(library: library, engine: engine, deviceID: device, settings: settings)
+        backup.onSynced = { [weak self] in self?.model.refreshBoards(); self?.model.reload(resetSelection: false) }
         backup.onStatus = { [weak self] in self?.backupItem?.title = self?.backup.status ?? "" }
         if !demo {
             monitor.start()
@@ -135,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(countItem)
         backupItem = NSMenuItem(title: "iCloud backup: not run yet", action: nil, keyEquivalent: "")
         menu.addItem(backupItem)
-        menu.addItem(withTitle: "Back Up to iCloud Now", action: #selector(backupNow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Back Up and Sync Now", action: #selector(backupNow), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",").target = self
         menu.addItem(.separator())

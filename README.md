@@ -31,10 +31,16 @@ ClipboardX into Applications. Apple Silicon, macOS 14 or later. The app is not n
 
 ## Features
 
-- Menu-bar app. `⇧⌘V` opens a shelf at the bottom of the screen (falls back to `⌥⌘V` if another app owns `⇧⌘V`).
-- Cards for text, links, images and files, pinboards with colors, `⌘1…9` quick paste, `⇧` for plain text.
-- Arrow keys to move, `⌘←` / `⌘→` to switch pinboards, `Return` to paste, `Esc` to close.
-- Skips content that apps mark as confidential or transient (password managers), and a list of ignored apps.
+- Menu-bar app. `⇧⌘V` opens a shelf at the bottom of the screen (falls back to `⌥⌘V` if another app owns it). Shortcuts are customizable.
+- **Two densities, one shelf.** Drag the top edge to make it taller: cards stay square and gain an app-colored header and big previews.
+- Cards for text, links, images and files, colored pinboards, `⌘1…9` quick paste, `⇧` for plain text, Quick Look on `Space`.
+- **Search that finds what you meant**, plus filters: `type:link`, `app:Safari`, `after:2026-09-01`, `today`, `yesterday`, `last week`, `last month`, or pick them from the filter menu.
+- **Nothing is lost by accident.** Delete sends a clip to *Recently Deleted* for 90 days (`⌘⌫`), restore from there. Editing text keeps the original in the library.
+- **Pinboards:** create, rename, recolor, reorder and delete (their clips go to the trash with them).
+- **Paste Stack** (`⇧⌘C`): copy several things, then paste them one after another from the Paste Stack view.
+- **Sync between Macs** over iCloud Drive: each Mac backs itself up there and merges the others' history in. Deletes, renames and pinboards merge too.
+- Optional **link previews** (page title and image), off by default.
+- Skips content that apps mark as confidential or transient (password managers), plus a list of ignored apps.
 - Incremental backup to iCloud Drive every ten minutes, with a completeness check.
 - Importer for the local database of another clipboard manager (see below), with a full verification pass.
 
@@ -79,15 +85,22 @@ swift run -c release cx-import verify --snapshot <snapshot.sqlite> --external <_
 
 Take the snapshot with `sqlite3 "file:<db>?mode=ro" "VACUUM INTO '<snapshot.sqlite>'"` while the other app is idle.
 
+## Privacy
+
+ClipboardX makes **no network requests** unless you turn on *link previews* in Settings. When enabled, each link you copy is
+sent to its own website to read the title and image. Links to your local network, links with credentials or tokens in them
+(`?token=`, `?key=`, `?code=` …) and one-time links such as password resets are never requested. iCloud backup and sync use
+iCloud Drive's own folder sync; ClipboardX itself does not talk to any server.
+
 ## Limitations
 
-- **No sync between Macs yet.** iCloud is used for *backup* only; merging the libraries of two machines is not built.
-- No deleting of clips, and limited pinboard management (no rename, delete, reorder or color picker).
-- No Paste-Stack-style multi-paste, no customizable shortcuts, no link previews.
-- The library and its backups are **not encrypted**.
-- Not notarized. Do not run it side by side with another clipboard manager: they interfere with each other's
-  shortcuts and paste events.
-- The UI layer has no automated tests; the core library has about 93% line coverage.
+- The library, its backups and the synced copies are **not encrypted** (issue #7). FileVault protects your Mac; iCloud protects
+  the folder in transit and at rest on Apple's side.
+- Sync was tested with simulated second Macs (including a 110,000-clip history); use on two real Macs is new, please report problems.
+  The first sync on a new Mac downloads the other Mac's packs, which can be several GB.
+- Not notarized, Apple Silicon only. Do not run it side by side with another clipboard manager: they interfere with each
+  other's shortcuts and paste events.
+- No ⌘V interception: Paste Stack is driven from the shelf.
 
 ## Not affiliated
 

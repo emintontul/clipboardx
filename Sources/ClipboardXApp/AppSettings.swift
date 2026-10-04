@@ -12,6 +12,7 @@ final class AppSettings: ObservableObject {
     @Published var soundEffects: Bool { didSet { defaults.set(soundEffects, forKey: "soundEffects") } }
     @Published var ignoreConfidential: Bool { didSet { defaults.set(ignoreConfidential, forKey: "ignoreConfidential") } }
     @Published var ignoreTransient: Bool { didSet { defaults.set(ignoreTransient, forKey: "ignoreTransient") } }
+    @Published var icloudSync: Bool { didSet { defaults.set(icloudSync, forKey: "icloudSync") } }
     @Published var linkPreviews: Bool { didSet { defaults.set(linkPreviews, forKey: "linkPreviews") } }
     @Published var icloudBackup: Bool { didSet { defaults.set(icloudBackup, forKey: "icloudBackup") } }
     @Published var ignoredApps: [String] { didSet { defaults.set(ignoredApps, forKey: "ignoredApps") } }
@@ -25,6 +26,7 @@ final class AppSettings: ObservableObject {
         ignoreTransient = bool("ignoreTransient", true)
         icloudBackup = bool("icloudBackup", true)
         linkPreviews = bool("linkPreviews", false)
+        icloudSync = bool("icloudSync", true)
         ignoredApps = UserDefaults.standard.stringArray(forKey: "ignoredApps") ?? ["com.apple.keychainaccess"]
     }
 

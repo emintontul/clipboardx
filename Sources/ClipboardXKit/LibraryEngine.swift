@@ -103,9 +103,12 @@ public final class LibraryEngine {
         let logDirectory = library.appendingPathComponent("log")
         let recent = try EventLog.readAllStamped(directory: logDirectory, after: offsets)
         guard !recent.isEmpty else { return }
-        let events = try EventLog.readAllStamped(directory: logDirectory)
-        let state = LibraryState.fold(events)
-        var touched = Set<String>(), boardIDs = Set<String>(), appIDs = Set<String>(), linkURLs = Set<String>()
+        try reconcile(recent: recent, extra: [], state: LibraryState.fold(try EventLog.readAllStamped(directory: logDirectory)))
+    }
+
+    /// Brings the index in line with `state` for everything the given events (and `extra` clip ids) touched.
+    private func reconcile(recent: [StampedEvent], extra: Set<String>, state: LibraryState) throws {
+        var touched = extra, boardIDs = Set<String>(), appIDs = Set<String>(), linkURLs = Set<String>()
         for stamped in recent {
             switch stamped.event {
             case .put(let r): touched.insert(r.id)
@@ -124,6 +127,27 @@ public final class LibraryEngine {
             try index.upsert(SearchDocument(id: id, title: record.title, text: RecordText.text(for: record, blobs: blobs),
                                             appName: appName, copiedAt: record.copiedAt, board: record.board,
                                             boardOrder: record.boardOrder, record: record, deletedAt: state.deleted[id]))
+        }
+    }
+
+    // MARK: sync with other Macs
+
+    /// Where to read a blob that is not on this Mac yet (another Mac's backup pack).
+    public func setRemoteBlobProvider(_ provider: ((String) -> Data?)?) { blobs.setFallback(provider) }
+
+    /// True only when the blob file is already on this Mac (no fetching).
+    public func hasBlobLocally(_ id: String) -> Bool { locked { blobs.contains(id) } }
+
+    /// True when the blob is on this Mac, fetching it from a remote pack first if needed.
+    public func hasBlob(_ id: String) -> Bool { locked { blobs.contains(id) || (try? blobs.get(id)) != nil } }
+
+    /// Folds every log (own and the copies of other Macs') and applies the result for what `events` touched. Replay order is
+    /// `(time, device)`, so every Mac that has the same events reaches the same state.
+    public func mergeRemote(_ events: [StampedEvent], also extra: Set<String> = []) throws {
+        try locked {
+            guard !building, !events.isEmpty || !extra.isEmpty else { return }
+            let all = try EventLog.readAllStamped(directory: library.appendingPathComponent("log"))
+            try reconcile(recent: events, extra: extra, state: LibraryState.fold(all))
         }
     }
 

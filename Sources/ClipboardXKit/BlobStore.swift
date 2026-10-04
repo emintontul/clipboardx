@@ -3,13 +3,15 @@ import Foundation
 
 /// Content-addressed, immutable blob storage: `root/ab/cd/<sha256>`.
 /// File layout: 1 codec byte (0 = raw, 1 = LZFSE) followed by the bytes. The id is the SHA-256 of the original data.
-public final class BlobStore: Sendable {
+public final class BlobStore: @unchecked Sendable {
     public enum StoreError: Error {
         case missing(String)
         case corrupted(String)
     }
 
     private let root: URL
+    private let fallbackLock = NSLock()
+    private var fallback: ((String) -> Data?)?
 
     public init(root: URL) throws {
         self.root = root
@@ -32,7 +34,21 @@ public final class BlobStore: Sendable {
         return id
     }
 
+    /// Where to look when a blob is not on this Mac yet (another Mac's pack). It returns the blob's stored bytes.
+    public func setFallback(_ provider: ((String) -> Data?)?) {
+        fallbackLock.lock(); defer { fallbackLock.unlock() }
+        fallback = provider
+    }
+
+    private func fallbackProvider() -> ((String) -> Data?)? {
+        fallbackLock.lock(); defer { fallbackLock.unlock() }
+        return fallback
+    }
+
     public func get(_ id: String) throws -> Data {
+        if !FileManager.default.fileExists(atPath: path(for: id).path), let stored = fallbackProvider()?(id) {
+            try importStored(id, stored: stored)
+        }
         guard let stored = try? Data(contentsOf: path(for: id)) else { throw StoreError.missing(id) }
         guard let codec = stored.first else { throw StoreError.corrupted(id) }
         let body = Data(stored.dropFirst())

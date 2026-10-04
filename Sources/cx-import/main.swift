@@ -18,6 +18,19 @@ if args.first == "demo" {
     do { try DemoSeed.run(at: out); exit(0) } catch { fail("error: \(error)") }
 }
 
+if args.first == "sync" {
+    guard let library = option("--library", in: args), let shared = option("--shared", in: args), let own = args.firstIndex(of: "--own").map({ args[$0 + 1] }),
+          let device = args.firstIndex(of: "--device").map({ args[$0 + 1] }) else { fail("usage: cx-import sync --library <lib> --shared <ClipboardX folder> --own <own folder name> --device <device id>") }
+    do {
+        let engine = try LibraryEngine(library: library, deviceID: device)
+        while engine.isIndexing { Thread.sleep(forTimeInterval: 0.2) }
+        let started = Date()
+        let r = try LibrarySync(engine: engine, sharedRoot: shared, ownFolder: own).syncNow()
+        print("devices=\(r.devices) newEvents=\(r.newEvents) blobsFetched=\(r.blobsFetched) deferred=\(r.deferred) pendingText=\(r.pendingText) seconds=\(String(format: "%.1f", Date().timeIntervalSince(started)))")
+        exit(0)
+    } catch { fail("error: \(error)") }
+}
+
 if ["backup", "restore", "backup-verify"].contains(args.first ?? "") {
     let deviceID = ProcessInfo.processInfo.hostName.replacingOccurrences(of: " ", with: "-")
     do {

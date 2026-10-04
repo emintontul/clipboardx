@@ -54,10 +54,17 @@ struct SettingsView: View {
             card {
                 Toggle("Open at login", isOn: Binding(get: { settings.openAtLogin }, set: { settings.openAtLogin = $0 }))
                 Toggle("iCloud backup", isOn: $settings.icloudBackup)
+                Toggle(isOn: $settings.icloudSync) {
+                    VStack(alignment: .leading) {
+                        Text("Sync with your other Macs")
+                        Text("Merges history from other Macs that run ClipboardX with iCloud backup on. Images and large items download when you first use them.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }.disabled(!settings.icloudBackup)
                 HStack {
                     Text(backupStatus()).font(.callout).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Back up now", action: backupNow)
+                    Button("Back up and sync now", action: backupNow)
                 }
                 Toggle("Sound effects", isOn: $settings.soundEffects)
             }

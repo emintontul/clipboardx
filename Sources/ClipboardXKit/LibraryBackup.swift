@@ -104,9 +104,9 @@ public enum LibraryBackup {
 
     // MARK: helpers
 
-    private struct ValidPack { let sequence: Int; let file: URL; let ids: [String] }
+    struct ValidPack { let sequence: Int; let file: URL; let ids: [String] }
 
-    private static func validPacks(in directory: URL) throws -> [ValidPack] {
+    static func validPacks(in directory: URL) throws -> [ValidPack] {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: directory.path) else { return [] }
         var out: [ValidPack] = []
