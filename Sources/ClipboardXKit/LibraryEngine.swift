@@ -388,9 +388,12 @@ public final class LibraryEngine {
         return try body()
     }
 
+    /// The pseudo-board id the UI uses for the trash view.
+    public static let trashBoardID = "trash"
+
     private static func scope(_ board: String?) -> SearchScope {
         guard let board, board != "sharedPasteboardHistory" else { return .history }
-        return .board(board)
+        return board == trashBoardID ? .trash : .board(board)
     }
 
     private func isBlankText(_ items: [PasteboardItem]) -> Bool {

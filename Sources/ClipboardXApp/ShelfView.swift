@@ -24,6 +24,18 @@ extension View {
     }
 }
 
+/// A small filled circle for menus, where SwiftUI shapes do not render.
+func colorDot(_ code: UInt32?, size: CGFloat = 10) -> Image {
+    let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        (code.map { NSColor(srgbRed: CGFloat(($0 >> 16) & 0xFF) / 255, green: CGFloat(($0 >> 8) & 0xFF) / 255, blue: CGFloat($0 & 0xFF) / 255, alpha: 1) }
+            ?? NSColor.gray).setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        return true
+    }
+    image.isTemplate = false
+    return Image(nsImage: image)
+}
+
 extension Color {
     /// Paste stores pinboard colors as ARGB integers.
     init(argb: UInt32) {
@@ -36,6 +48,7 @@ struct ShelfView: View {
     @ObservedObject var model: ShelfModel
     @FocusState private var searchFocused: Bool
     @State private var newBoardName = ""
+    @State private var boardRenameText = ""
 
     var body: some View {
         VStack(spacing: 10) {
@@ -129,6 +142,8 @@ struct ShelfView: View {
             HStack(spacing: 6) {
                 if board.id == ShelfModel.historyID {
                     Image(systemName: "clock").font(.system(size: 11, weight: .medium))
+                } else if board.id == ShelfModel.trashID {
+                    Image(systemName: "trash").font(.system(size: 11, weight: .medium))
                 } else {
                     Circle().fill(model.boardColors[board.id].map { Color(argb: $0) } ?? Color.gray).frame(width: 9, height: 9)
                 }
@@ -137,7 +152,34 @@ struct ShelfView: View {
             .padding(.horizontal, 11).padding(.vertical, 5)
             .background(selected ? Color.white.opacity(0.16) : Color.clear, in: Capsule())
             .foregroundStyle(selected ? Color.white : Color.white.opacity(0.72))
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
+        .contextMenu { boardMenu(board) }
+        .popover(isPresented: Binding(get: { model.renamingBoardID == board.id }, set: { if !$0 { model.renamingBoardID = nil } })) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Rename pinboard").font(.headline)
+                TextField("Name", text: $boardRenameText).frame(width: 200).onSubmit { model.renameBoard(board.id, to: boardRenameText) }
+                HStack { Spacer(); Button("Save") { model.renameBoard(board.id, to: boardRenameText) }.keyboardShortcut(.defaultAction) }
+            }.padding(14)
+        }
+    }
+
+    @ViewBuilder private func boardMenu(_ board: BoardRecord) -> some View {
+        if board.id != ShelfModel.historyID, board.id != ShelfModel.trashID {
+            Button("Rename…") { boardRenameText = board.name; model.renamingBoardID = board.id }
+            Menu("Color") {
+                ForEach(BoardPalette.colors, id: \.code) { color in
+                    Button { model.recolorBoard(board.id, code: color.code) } label: {
+                        Label { Text(color.name) } icon: { colorDot(color.code) }
+                    }
+                }
+            }
+            Divider()
+            Button("Move Left") { model.moveBoard(board.id, by: -1) }
+            Button("Move Right") { model.moveBoard(board.id, by: 1) }
+            Divider()
+            Button("Delete Pinboard", role: .destructive) { model.deleteBoard(board.id) }
+        }
     }
 
     private var newBoardPopover: some View {
@@ -150,9 +192,15 @@ struct ShelfView: View {
 
     private var emptyState: some View {
         VStack(spacing: 6) {
+            if model.indexing {
+                ProgressView(value: model.indexingProgress).frame(width: 220)
+                Text("Indexing your library… \(Int(model.indexingProgress * 100))%").font(.system(size: 14, weight: .medium))
+                Text("New copies are still being saved.").font(.system(size: 12)).foregroundStyle(.secondary)
+            } else {
             Image(systemName: "doc.on.clipboard").font(.system(size: 26)).foregroundStyle(.secondary)
-            Text(model.query.isEmpty ? "Nothing here yet" : "No matches").font(.system(size: 14, weight: .medium))
+            Text(model.query.isEmpty ? (model.inTrash ? "Trash is empty" : "Nothing here yet") : "No matches").font(.system(size: 14, weight: .medium))
             if !model.query.isEmpty { Text("Try fewer letters or another spelling.").font(.system(size: 12)).foregroundStyle(.secondary) }
+            }
         }
         .frame(width: 320, height: 190)
     }
@@ -185,6 +233,20 @@ struct CardView: View {
         .onAppear { PreviewStore.shared.load(card.record) { preview = $0 } }
         .contextMenu { menu }
         .popover(isPresented: Binding(get: { model.renamingID == card.id }, set: { if !$0 { model.renamingID = nil } })) { renamePopover }
+        .background { Color.clear.popover(isPresented: Binding(get: { model.editingID == card.id }, set: { if !$0 { model.editingID = nil } })) { editPopover } }
+    }
+
+    private var editPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Edit text").font(.headline)
+            TextEditor(text: $model.editText).font(.system(size: 12, design: .monospaced)).frame(width: 380, height: 240)
+            HStack {
+                Text("The original stays in your library.").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") { model.editingID = nil }
+                Button("Save") { model.edit(card.id, text: model.editText) }.keyboardShortcut(.defaultAction)
+            }
+        }.padding(14)
     }
 
     private var top: some View {
@@ -262,14 +324,25 @@ struct CardView: View {
     private func looksLikeCode(_ text: String) -> Bool { text.contains("{") || text.contains("$ ") || text.contains("=>") || text.contains("();") || text.hasPrefix("#!") }
 
     @ViewBuilder private var menu: some View {
-        Button("Paste") { model.selection = card.id; model.pasteSelected(plain: false) }
-        Button("Paste as Plain Text") { model.selection = card.id; model.pasteSelected(plain: true) }
-        Divider()
-        Button("Rename…") { renameText = card.record.title ?? ""; model.renamingID = card.id }
-        Menu("Pin to") {
-            ForEach(model.boards.filter { $0.id != ShelfModel.historyID }, id: \.id) { board in
-                Button(board.name) { model.pin(card.id, to: board) }
+        if model.inTrash {
+            Button("Restore") { model.restore(card.id) }
+        } else {
+            Button("Paste") { model.selection = card.id; model.pasteSelected(plain: false) }
+            Button("Paste as Plain Text") { model.selection = card.id; model.pasteSelected(plain: true) }
+            Divider()
+            if model.canEdit(card.record) { Button("Edit…") { model.beginEdit(card.id) } }
+            Button("Rename…") { renameText = card.record.title ?? ""; model.renamingID = card.id }
+            Menu("Pin to") {
+                ForEach(model.boards.filter { $0.id != ShelfModel.historyID && $0.id != ShelfModel.trashID }, id: \.id) { board in
+                    Button { model.pin(card.id, to: board) } label: {
+                        Label { Text(board.name) } icon: { colorDot(model.boardColors[board.id]) }
+                    }
+                }
+                Divider()
+                Button("Create Pinboard…") { model.pendingPinClipID = card.id; model.addingBoard = true }
             }
+            Divider()
+            Button("Delete", role: .destructive) { model.delete(card.id) }
         }
     }
 

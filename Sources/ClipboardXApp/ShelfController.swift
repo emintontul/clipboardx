@@ -92,6 +92,8 @@ final class ShelfController {
         case 123: consumedKeys.insert(event.keyCode); command ? model.switchBoard(by: -1) : model.move(-1); return nil
         case 124: consumedKeys.insert(event.keyCode); command ? model.switchBoard(by: 1) : model.move(1); return nil
         case 36, 76: consumedKeys.insert(event.keyCode); model.pasteSelected(plain: shift); return nil
+        case 51, 117 where command: consumedKeys.insert(event.keyCode); model.deleteSelected(); return nil
+        case 14 where command: consumedKeys.insert(event.keyCode); model.editSelected(); return nil
         default: break
         }
         if command, let digit = event.charactersIgnoringModifiers.flatMap({ Int($0) }), (1...9).contains(digit) {

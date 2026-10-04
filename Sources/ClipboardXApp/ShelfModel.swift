@@ -7,9 +7,18 @@ struct ShelfCard: Identifiable {
     var id: String { record.id }
 }
 
+enum BoardPalette {
+    static let colors: [(name: String, code: UInt32)] = [
+        ("Red", 0xFFFF453A), ("Orange", 0xFFFF9F0A), ("Yellow", 0xFFFFD60A), ("Green", 0xFF32D74B),
+        ("Blue", 0xFF0A84FF), ("Purple", 0xFFBF5AF2), ("Gray", 0xFF8E8E93),
+    ]
+    static func next(after count: Int) -> UInt32 { colors[count % colors.count].code }
+}
+
 /// State behind the shelf. Everything runs on the main thread; queries take a few milliseconds.
 final class ShelfModel: ObservableObject {
     static let historyID = "sharedPasteboardHistory"
+    static let trashID = LibraryEngine.trashBoardID
     let engine: LibraryEngine
     let settings: AppSettings
     @Published var query = "" { didSet { if query != oldValue { reload(resetSelection: true) } } }
@@ -18,10 +27,17 @@ final class ShelfModel: ObservableObject {
     @Published private(set) var cards: [ShelfCard] = []
     @Published var selection: String?
     @Published var renamingID: String?
+    @Published var editingID: String?
+    @Published var editText = ""
+    @Published var renamingBoardID: String?
+    @Published var pendingPinClipID: String?
     @Published private(set) var statusLine = ""
     @Published private(set) var boardColors: [String: UInt32] = [:]
     @Published var addingBoard = false
+    @Published private(set) var indexing = false
+    @Published private(set) var indexingProgress = 0.0
     private var limit = 60
+    private var indexTimer: Timer?
     var onPaste: ((ClipRecord, Bool) -> Void)?
     var onOpenSettings: (() -> Void)?
 
@@ -30,15 +46,34 @@ final class ShelfModel: ObservableObject {
         self.settings = settings
         refreshBoards()
         reload(resetSelection: true)
+        watchIndexing()
     }
 
     var currentBoard: BoardRecord? { boards.indices.contains(boardIndex) ? boards[boardIndex] : nil }
+    var inTrash: Bool { currentBoard?.id == Self.trashID }
+
+    /// While the index is rebuilt in the background the shelf shows progress, then fills itself in.
+    private func watchIndexing() {
+        guard engine.isIndexing else { return }
+        indexing = true
+        indexTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] timer in
+            guard let self else { return timer.invalidate() }
+            self.indexingProgress = self.engine.indexingProgress
+            if !self.engine.isIndexing {
+                timer.invalidate()
+                self.indexing = false
+                self.refreshBoards()
+                self.reload(resetSelection: true)
+            }
+        }
+    }
 
     func refreshBoards() {
         var list = (try? engine.boards()) ?? []
         if !list.contains(where: { $0.id == Self.historyID }) {
             list.insert(BoardRecord(id: Self.historyID, name: "Clipboard History", index: -1, kind: 1, createdAt: 0, attributesBlob: nil), at: 0)
         }
+        list.append(BoardRecord(id: Self.trashID, name: "Recently Deleted", index: Int.max, kind: 3, createdAt: 0, attributesBlob: nil))
         boards = list
         boardColors = Dictionary(uniqueKeysWithValues: list.compactMap { board in engine.boardColorCode(board).map { (board.id, $0) } })
         boardIndex = min(boardIndex, max(list.count - 1, 0))
@@ -92,10 +127,52 @@ final class ShelfModel: ObservableObject {
         onPaste?(cards[index].record, plain || settings.alwaysPlainText)
     }
 
+    // MARK: clips
+
     func rename(_ id: String, to title: String) {
         try? engine.setTitle(id, to: title)
         renamingID = nil
         reload(resetSelection: false)
+    }
+
+    func edit(_ id: String, text: String) {
+        _ = try? engine.edit(id, text: text)
+        editingID = nil
+        reload(resetSelection: false)
+    }
+
+    func beginEdit(_ id: String) {
+        guard let card = cards.first(where: { $0.id == id }), canEdit(card.record) else { return }
+        editText = engine.text(of: card.record)
+        editingID = id
+    }
+
+    func editSelected() { if let id = selection { beginEdit(id) } }
+
+    func canEdit(_ record: ClipRecord) -> Bool {
+        record.representations.contains { $0.uti == "public.utf8-plain-text" } && !inTrash
+    }
+
+    func deleteSelected() { if let id = selection { delete(id) } }
+
+    func delete(_ id: String) {
+        guard !inTrash else { return }
+        let next = neighbor(of: id)
+        try? engine.delete(id)
+        reload(resetSelection: false)
+        selection = next
+    }
+
+    func restore(_ id: String) {
+        let next = neighbor(of: id)
+        try? engine.restore(id)
+        reload(resetSelection: false)
+        selection = next
+    }
+
+    private func neighbor(of id: String) -> String? {
+        guard let i = cards.firstIndex(where: { $0.id == id }) else { return selection }
+        return cards.indices.contains(i + 1) ? cards[i + 1].id : (i > 0 ? cards[i - 1].id : nil)
     }
 
     func pin(_ id: String, to board: BoardRecord) {
@@ -103,14 +180,47 @@ final class ShelfModel: ObservableObject {
         refreshBoards()
     }
 
+    // MARK: pinboards
+
+    /// Creates a pinboard; when a clip is waiting (from "Create Pinboard…" in the Pin menu) it is pinned to the new board.
     func addBoard(named name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         addingBoard = false
+        let waiting = pendingPinClipID
+        pendingPinClipID = nil
         guard !trimmed.isEmpty else { return }
-        let palette: [UInt32] = [0xFFFF453A, 0xFF32D74B, 0xFFBF5AF2, 0xFFFFD60A, 0xFFFF9F0A, 0xFF0A84FF, 0xFF64D2FF]
-        try? engine.addBoard(id: "list:" + UUID().uuidString, name: trimmed, colorCode: palette[boards.count % palette.count])
+        let id = "list:" + UUID().uuidString
+        try? engine.addBoard(id: id, name: trimmed, colorCode: BoardPalette.next(after: boards.count))
+        if let waiting { _ = try? engine.pin(waiting, to: id) }
         refreshBoards()
-        selectBoard(boards.count - 1)
+        if let index = boards.firstIndex(where: { $0.id == id }) { selectBoard(index) }
+    }
+
+    func renameBoard(_ id: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        renamingBoardID = nil
+        guard !trimmed.isEmpty else { return }
+        try? engine.renameBoard(id, to: trimmed)
+        refreshBoards()
+    }
+
+    func recolorBoard(_ id: String, code: UInt32) {
+        try? engine.recolorBoard(id, colorCode: code)
+        refreshBoards()
+    }
+
+    func deleteBoard(_ id: String) {
+        try? engine.deleteBoard(id)
+        refreshBoards()
+        selectBoard(0)
+        reload(resetSelection: true)
+    }
+
+    func moveBoard(_ id: String, by delta: Int) {
+        let active = boards.filter { $0.id != Self.trashID }
+        guard let from = active.firstIndex(where: { $0.id == id }) else { return }
+        try? engine.moveBoard(id, toIndex: from + delta)
+        refreshBoards()
     }
 
     func resetForShow() {
@@ -118,6 +228,8 @@ final class ShelfModel: ObservableObject {
         limit = 60
         boardIndex = 0
         renamingID = nil
+        editingID = nil
+        renamingBoardID = nil
         refreshBoards()
         reload(resetSelection: true)
     }

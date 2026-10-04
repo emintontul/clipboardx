@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             backup.start()
         }
         if env["CLIPBOARDX_DEMO_BACKDROP"] == "1" { showBackdrop() }
+        if !demo { schedulePurge() }
 
         hotKey = HotKey(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey), id: 1) { [weak self] in self?.shelf.toggle() }
         if hotKey == nil {
@@ -67,6 +68,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let board { self?.model.selectBoard(board) }
             }
         }
+    }
+
+    /// Trash older than 90 days is removed for good. Runs shortly after launch and every six hours.
+    private func schedulePurge() {
+        let purge = { [engine] in
+            DispatchQueue.global(qos: .utility).async { _ = try? engine?.purgeExpired() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { purge() }
+        Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in purge() }
     }
 
     /// Screenshots only: a plain gradient window behind the shelf so no real desktop content shows through the glass.

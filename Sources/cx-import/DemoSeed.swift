@@ -57,6 +57,7 @@ enum DemoSeed {
         if let id = try byTitle("swift.org") { try engine.pin(id, to: "list:links") }
         if let id = try byTitle("nspasteboard") { try engine.pin(id, to: "list:links") }
         if let id = try byTitle("Invoice") { try engine.pin(id, to: "list:receipts") }
+        if let id = try byTitle("Call Alex") { try engine.delete(id, now: now - 3600) }
         print("demo library at \(library.path): \(ids.count) clips, \(boards.count) pinboards")
     }
 
