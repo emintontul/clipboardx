@@ -31,6 +31,8 @@ final class ShelfController {
     private static let minHeight: CGFloat = 276
     private static let maxHeight: CGFloat = 460
     private static let margin: CGFloat = 8
+    /// Transparent room around the glass for its soft shadow, so no square window shadow shows at the corners.
+    static let pad: CGFloat = 24
     private var height: CGFloat = 276
 
     init(model: ShelfModel) {
@@ -39,7 +41,7 @@ final class ShelfController {
         let override = ProcessInfo.processInfo.environment["CLIPBOARDX_SHELF_HEIGHT"].flatMap(Double.init)
         height = min(max(CGFloat(override ?? (saved > 0 ? saved : 276)), Self.minHeight), Self.maxHeight)
         model.shelfHeight = height
-        panel = ShelfPanel(contentRect: NSRect(x: 0, y: 0, width: 900, height: height),
+        panel = ShelfPanel(contentRect: NSRect(x: 0, y: 0, width: 900, height: height + Self.pad * 2),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -78,11 +80,12 @@ final class ShelfController {
         // CLIPBOARDX_SHELF_WIDTH narrows and centers the shelf; used only to frame screenshots.
         let full = screen.frame.width - Self.margin * 2
         let width = ProcessInfo.processInfo.environment["CLIPBOARDX_SHELF_WIDTH"].flatMap(Double.init).map { min(CGFloat($0), full) } ?? full
-        let target = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.minY + Self.margin, width: width, height: height)
+        let target = NSRect(x: screen.frame.midX - width / 2 - Self.pad, y: screen.frame.minY + Self.margin - Self.pad,
+                            width: width + Self.pad * 2, height: height + Self.pad * 2)
         panel.setFrame(target.offsetBy(dx: 0, dy: -(height + Self.margin)), display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
-        panel.makeKey()
+        if ProcessInfo.processInfo.environment["CLIPBOARDX_DEMO"] != "1" { panel.makeKey() }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.16
             panel.animator().setFrame(target, display: true)
@@ -93,12 +96,12 @@ final class ShelfController {
 
     /// Keeps the bottom edge fixed and follows the mouse with the top edge.
     private func dragResize() {
-        let newHeight = min(max(NSEvent.mouseLocation.y - panel.frame.minY + 8, Self.minHeight), Self.maxHeight)
+        let newHeight = min(max(NSEvent.mouseLocation.y - (panel.frame.minY + Self.pad) + 6, Self.minHeight), Self.maxHeight)
         guard newHeight != height else { return }
         height = newHeight
         model.shelfHeight = newHeight
         var frame = panel.frame
-        frame.size.height = newHeight
+        frame.size.height = newHeight + Self.pad * 2
         panel.setFrame(frame, display: true)
     }
 
@@ -122,7 +125,7 @@ final class ShelfController {
         look.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         look.contentView = NSHostingView(rootView: QuickLookView(card: card, model: model))
         let shelf = panel.frame
-        look.setFrame(NSRect(x: shelf.midX - size.width / 2, y: shelf.maxY + 14, width: size.width, height: size.height), display: true)
+        look.setFrame(NSRect(x: shelf.midX - size.width / 2, y: shelf.maxY - Self.pad + 10, width: size.width, height: size.height), display: true)
         quickLookOpen = true
         look.orderFrontRegardless()
         look.makeKey()

@@ -58,15 +58,15 @@ struct ShelfView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 12) {
+                        LazyHStack(spacing: 16) {
                             ForEach(Array(model.cards.enumerated()), id: \.element.id) { index, card in
                                 CardView(card: card, number: index < 9 ? index + 1 : nil, selected: card.id == model.selection, model: model)
                                     .id(card.id)
                                     .onAppear { model.loadMoreIfNeeded(after: card) }
                             }
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
                     }
                     .onChange(of: model.selection) { _, id in
                         guard let id else { return }
@@ -77,8 +77,12 @@ struct ShelfView: View {
         }
         .padding(.top, 14)
         .padding(.bottom, 10)
-        .shelfGlass(cornerRadius: 30)
+        .shelfGlass(cornerRadius: 34)
+        .overlay(RoundedRectangle(cornerRadius: 34, style: .continuous)
+            .strokeBorder(LinearGradient(colors: [.white.opacity(0.38), .white.opacity(0.06)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
         .overlay(alignment: .top) { resizeHandle }
+        .shadow(color: .black.opacity(0.38), radius: 22, y: 8)
+        .padding(ShelfController.pad)
         .preferredColorScheme(.dark)
         .onAppear { searchFocused = true }
     }
@@ -294,14 +298,16 @@ struct CardView: View {
     @State private var preview: Preview?
     @State private var renameText = ""
 
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16, style: .continuous) }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 20, style: .continuous) }
 
     var body: some View {
         Group { if model.expanded { expanded } else { compact } }
             .frame(width: model.cardWidth, height: model.cardHeight)
-            .background(Color(white: 0.10).opacity(0.92), in: shape)
+            .background(LinearGradient(colors: [Color(white: 0.17), Color(white: 0.105)], startPoint: .top, endPoint: .bottom), in: shape)
             .clipShape(shape)
-            .overlay(shape.strokeBorder(selected ? Color.accentColor : Color.white.opacity(0.09), lineWidth: selected ? 3 : 1))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
+            .overlay { if selected { shape.inset(by: -5).stroke(Color.accentColor, lineWidth: 3) } }   // ring sits outside, so corners stay clean
+            .shadow(color: .black.opacity(selected ? 0.5 : 0.32), radius: selected ? 16 : 9, y: 5)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { model.selection = card.id; model.pasteSelected(plain: false) }
             .onTapGesture { model.selection = card.id }
@@ -356,7 +362,8 @@ struct CardView: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 14).padding(.vertical, 10).frame(height: 66)
-            .background(LinearGradient(colors: [headerColor, headerColor.opacity(0.86)], startPoint: .top, endPoint: .bottom))
+            .background(LinearGradient(colors: [headerColor.opacity(0.98), headerColor.opacity(0.84)], startPoint: .top, endPoint: .bottom))
+            .overlay(alignment: .top) { LinearGradient(colors: [.white.opacity(0.28), .clear], startPoint: .top, endPoint: .bottom).frame(height: 22) }
 
             expandedBody.frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -366,7 +373,6 @@ struct CardView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
-        .background(Color(white: 0.13))
     }
 
     @ViewBuilder private var expandedBody: some View {
