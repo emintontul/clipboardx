@@ -27,7 +27,7 @@ ClipboardX into Applications. Apple Silicon, macOS 14 or later. The app is not n
   Queries take a few milliseconds on a library of ~110,000 clips.
 - **Your history is yours.** Every change is appended to an event log; the search index is derived and can be rebuilt
   at any time. History is never deleted automatically.
-- **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26 and later, no web views, no network access.
+- **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26 and later, no web views, and no network access unless you turn on link previews.
 
 ## Features
 
