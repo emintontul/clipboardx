@@ -309,16 +309,18 @@ public final class LibraryEngine {
 
     // MARK: queries
 
-    public func recent(board: String?, limit: Int, offset: Int = 0) throws -> [ClipRecord] {
-        try locked { try index.recentRecords(scope: Self.scope(board), limit: limit, offset: offset) }
+    public func recent(board: String?, limit: Int, offset: Int = 0, filters: ClipFilters = ClipFilters()) throws -> [ClipRecord] {
+        try locked { try index.recentRecords(scope: Self.scope(board), limit: limit, offset: offset, filters: filters) }
     }
 
-    public func search(_ query: String, board: String?, limit: Int) throws -> [ClipRecord] {
+    public func search(_ query: String, board: String?, limit: Int, filters: ClipFilters = ClipFilters()) throws -> [ClipRecord] {
         try locked {
-            let hits = try index.search(query, limit: limit, scope: Self.scope(board))
+            let hits = try index.search(query, limit: limit, scope: Self.scope(board), filters: filters)
             return try index.records(ids: hits.map(\.id))
         }
     }
+
+    public func appsInUse() throws -> [AppRecord] { try locked { try index.appsInUse() } }
 
     public func boards() throws -> [BoardRecord] { try locked { try index.boards() } }
     public func app(bundleID: String) throws -> AppRecord? { try locked { try index.app(bundleID: bundleID) } }

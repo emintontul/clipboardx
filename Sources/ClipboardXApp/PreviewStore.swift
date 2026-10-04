@@ -1,6 +1,8 @@
 import AppKit
 import ClipboardXKit
 import ImageIO
+import QuickLookThumbnailing
+import SwiftUI
 
 final class Preview {
     let text: String
@@ -9,10 +11,13 @@ final class Preview {
     let imageSize: CGSize?
     let isLink: Bool
     let fileNames: [String]
+    let filePaths: [String]
+    let fileImage: NSImage?
 
-    init(text: String, charCount: Int, image: NSImage?, imageSize: CGSize?, isLink: Bool, fileNames: [String]) {
+    init(text: String, charCount: Int, image: NSImage?, imageSize: CGSize?, isLink: Bool, fileNames: [String],
+         filePaths: [String] = [], fileImage: NSImage? = nil) {
         self.text = text; self.charCount = charCount; self.image = image; self.imageSize = imageSize
-        self.isLink = isLink; self.fileNames = fileNames
+        self.isLink = isLink; self.fileNames = fileNames; self.filePaths = filePaths; self.fileImage = fileImage
     }
 }
 
@@ -23,6 +28,8 @@ final class PreviewStore {
     private let cache = NSCache<NSString, Preview>()
     private let queue = DispatchQueue(label: "clipboardx.preview", qos: .userInitiated, attributes: .concurrent)
     private let icons = NSCache<NSString, NSImage>()
+    private var colors: [String: Color?] = [:]
+    private let colorLock = NSLock()
 
     private init() { cache.countLimit = 400 }
 
@@ -44,6 +51,26 @@ final class PreviewStore {
         return image
     }
 
+    /// Header color for a source app, derived from its icon once and remembered.
+    func appColor(bundleID: String?) -> Color? {
+        guard let bundleID, let engine else { return nil }
+        colorLock.lock(); defer { colorLock.unlock() }
+        if let known = colors[bundleID] { return known }
+        let color = (try? engine.iconData(bundleID: bundleID)).flatMap { $0 }.flatMap(AppColor.dominant(of:)).map { Color(argb: $0) }
+        colors[bundleID] = .some(color)
+        return color
+    }
+
+    private static func fileThumbnail(path: String) -> NSImage? {
+        let request = QLThumbnailGenerator.Request(fileAt: URL(fileURLWithPath: path), size: CGSize(width: 256, height: 256),
+                                                   scale: 2, representationTypes: .thumbnail)
+        let done = DispatchSemaphore(value: 0)
+        var image: NSImage?
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { rep, _ in image = rep?.nsImage; done.signal() }
+        _ = done.wait(timeout: .now() + 2)
+        return image ?? NSWorkspace.shared.icon(forFile: path)
+    }
+
     private static func build(_ record: ClipRecord, engine: LibraryEngine) -> Preview {
         let full = engine.text(of: record)
         let trimmed = full.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,9 +81,12 @@ final class PreviewStore {
             size = CGSize(width: thumb.width, height: thumb.height)
         }
         let isFile = record.representations.contains { $0.uti == "public.file-url" }
-        let names = isFile ? trimmed.split(separator: "\n").map { ($0 as NSString).lastPathComponent } : []
+        let paths = isFile ? trimmed.split(separator: "\n").map(String.init) : []
+        let names = paths.map { ($0 as NSString).lastPathComponent }
+        let fileImage = paths.first.flatMap { fileThumbnail(path: $0) }
         let isLink = !trimmed.contains(" ") && !trimmed.contains("\n") && (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://"))
-        return Preview(text: String(trimmed.prefix(700)), charCount: full.count, image: image, imageSize: size, isLink: isLink, fileNames: names)
+        return Preview(text: String(trimmed.prefix(1500)), charCount: full.count, image: image, imageSize: size, isLink: isLink,
+                       fileNames: names, filePaths: paths, fileImage: fileImage)
     }
 
     private static func thumbnail(_ data: Data) -> CGImage? {

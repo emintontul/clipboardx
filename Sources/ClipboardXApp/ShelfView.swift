@@ -78,13 +78,25 @@ struct ShelfView: View {
         .padding(.top, 14)
         .padding(.bottom, 10)
         .shelfGlass(cornerRadius: 30)
+        .overlay(alignment: .top) { resizeHandle }
         .preferredColorScheme(.dark)
         .onAppear { searchFocused = true }
     }
 
+    /// Drag the top edge to make the shelf taller: past a threshold the cards switch to colored headers and big previews.
+    private var resizeHandle: some View {
+        Capsule().fill(Color.white.opacity(0.22)).frame(width: 40, height: 4).padding(.top, 5)
+            .frame(maxWidth: .infinity, minHeight: 18, alignment: .top)
+            .contentShape(Rectangle())
+            .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in model.onResizeDrag?() }
+                .onEnded { _ in model.onResizeEnd?() })
+    }
+
     private var header: some View {
         ZStack {
-            chips.padding(.horizontal, 340)
+            chips.padding(.leading, (!model.query.isEmpty || model.hasFilters) ? 640 : 340).padding(.trailing, 340)
             HStack(spacing: 8) {
                 Text("ClipboardX").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.accentColor)
                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -101,24 +113,92 @@ struct ShelfView: View {
             }
         }
         .padding(.horizontal, 20)
+        .overlay(alignment: .topLeading) { suggestionList.padding(.leading, 112).offset(y: 38) }
+        .zIndex(10)
+    }
+
+    @ViewBuilder private var suggestionList: some View {
+        let items = model.suggestions
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(items) { suggestion in
+                    Button { model.apply(suggestion) } label: {
+                        Label(suggestion.title, systemImage: suggestion.symbol)
+                            .font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(6).frame(width: 190)
+            .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.12)))
+            .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+        }
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
+        let active = !model.query.isEmpty || model.hasFilters
+        return HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+            filterMenu
+            ForEach(model.kindFilters.sorted { $0.rawValue < $1.rawValue }, id: \.self) { kind in
+                filterChip(kind.title, symbol: kind.symbol) { model.kindFilters.remove(kind) }
+            }
+            if let app = model.appFilter { filterChip(app, symbol: "app") { model.appFilter = nil } }
+            if let preset = model.datePreset { filterChip(preset.rawValue, symbol: preset.symbol) { model.datePreset = nil } }
             TextField("", text: $model.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($searchFocused)
-                .frame(width: model.query.isEmpty ? 2 : 190)
-            if !model.query.isEmpty {
+                .frame(width: active ? 150 : 2)
+            if active {
                 Text(model.statusLine).font(.system(size: 11)).foregroundStyle(.secondary)
-                Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
+                Button { model.query = ""; model.clearFilters() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(model.query.isEmpty ? Color.clear : Color.white.opacity(0.10), in: Capsule())
-        .animation(.easeOut(duration: 0.15), value: model.query.isEmpty)
+        .background(active ? Color.white.opacity(0.10) : Color.clear, in: Capsule())
+        .animation(.easeOut(duration: 0.15), value: active)
+    }
+
+    private func filterChip(_ title: String, symbol: String, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .medium))
+            Text(title).font(.system(size: 12, weight: .medium))
+            Button(action: remove) { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }.buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Color.white.opacity(0.16), in: Capsule())
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Menu("Type") {
+                ForEach(ClipKind.allCases, id: \.self) { kind in
+                    Toggle(isOn: Binding(get: { model.kindFilters.contains(kind) },
+                                         set: { if $0 { model.kindFilters.insert(kind) } else { model.kindFilters.remove(kind) } })) {
+                        Label(kind.title, systemImage: kind.symbol)
+                    }
+                }
+            }
+            Menu("App") {
+                ForEach(model.appsInUse, id: \.bundleID) { app in Button(app.name) { model.appFilter = app.name } }
+                Divider()
+                Button("Any app") { model.appFilter = nil }
+            }
+            Menu("Date") {
+                ForEach(DatePreset.allCases) { preset in Button(preset.rawValue) { model.datePreset = preset } }
+                Divider()
+                Button("Any time") { model.datePreset = nil }
+            }
+            Divider()
+            Button("Clear Filters") { model.clearFilters() }.disabled(!model.hasFilters)
+        } label: {
+            Image(systemName: model.hasFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 13)).foregroundStyle(model.hasFilters ? Color.accentColor : Color.secondary)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .onTapGesture { model.refreshApps() }
     }
 
     /// Centered when they fit; scrolls (and fades at the edges) on very narrow screens.
@@ -214,60 +294,139 @@ struct CardView: View {
     @State private var preview: Preview?
     @State private var renameText = ""
 
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16, style: .continuous) }
+
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 0) {
-                top
-                content.padding(.horizontal, 11).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                bottom
-            }
-        }
-        .frame(width: 198, height: 198)
-        .background(Color(white: 0.10).opacity(0.92), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(selected ? Color.accentColor : Color.white.opacity(0.09), lineWidth: selected ? 3 : 1))
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) { model.selection = card.id; model.pasteSelected(plain: false) }
-        .onTapGesture { model.selection = card.id }
-        .onAppear { PreviewStore.shared.load(card.record) { preview = $0 } }
-        .contextMenu { menu }
-        .popover(isPresented: Binding(get: { model.renamingID == card.id }, set: { if !$0 { model.renamingID = nil } })) { renamePopover }
-        .background { Color.clear.popover(isPresented: Binding(get: { model.editingID == card.id }, set: { if !$0 { model.editingID = nil } })) { editPopover } }
+        Group { if model.expanded { expanded } else { compact } }
+            .frame(width: model.cardWidth, height: model.cardHeight)
+            .background(Color(white: 0.10).opacity(0.92), in: shape)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(selected ? Color.accentColor : Color.white.opacity(0.09), lineWidth: selected ? 3 : 1))
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { model.selection = card.id; model.pasteSelected(plain: false) }
+            .onTapGesture { model.selection = card.id }
+            .onAppear { PreviewStore.shared.load(card.record) { preview = $0 } }
+            .contextMenu { menu }
+            .popover(isPresented: Binding(get: { model.renamingID == card.id }, set: { if !$0 { model.renamingID = nil } })) { renamePopover }
+            .background { Color.clear.popover(isPresented: Binding(get: { model.editingID == card.id }, set: { if !$0 { model.editingID = nil } })) { editPopover } }
     }
 
-    private var editPopover: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Edit text").font(.headline)
-            TextEditor(text: $model.editText).font(.system(size: 12, design: .monospaced)).frame(width: 380, height: 240)
-            HStack {
-                Text("The original stays in your library.").font(.caption).foregroundStyle(.secondary)
+    // MARK: compact
+
+    private var compact: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                (Text(card.record.title ?? kindLabel).fontWeight(.semibold) + Text("  " + compactAge).foregroundColor(.secondary))
+                    .font(.system(size: 11.5)).lineLimit(1)
+                Spacer(minLength: 4)
+                appIcon(17)
+            }
+            .padding(.horizontal, 11).padding(.top, 9).padding(.bottom, 6)
+            content.padding(.horizontal, 11).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            HStack(spacing: 4) {
                 Spacer()
-                Button("Cancel") { model.editingID = nil }
-                Button("Save") { model.edit(card.id, text: model.editText) }.keyboardShortcut(.defaultAction)
+                Image(systemName: bottomSymbol).font(.system(size: 9)).foregroundStyle(.secondary)
+                if let number { Text("\(number)").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary) }
             }
-        }.padding(14)
+            .padding(.horizontal, 11).padding(.vertical, 7)
+        }
     }
 
-    private var top: some View {
-        HStack(spacing: 6) {
-            (Text(card.record.title ?? kindLabel).fontWeight(.semibold) + Text("  " + compactAge).foregroundColor(.secondary))
-                .font(.system(size: 11.5)).lineLimit(1)
-            Spacer(minLength: 4)
-            if let icon = PreviewStore.shared.icon(bundleID: card.record.appBundleID) {
-                Image(nsImage: icon).resizable().frame(width: 17, height: 17)
-            }
-        }
-        .padding(.horizontal, 11).padding(.top, 9).padding(.bottom, 6)
+    // MARK: expanded
+
+    private var headerColor: Color {
+        PreviewStore.shared.appColor(bundleID: card.record.appBundleID) ?? {
+            switch kindLabel { case "Link": return Color(red: 0.20, green: 0.45, blue: 0.95); case "Image": return Color(red: 0.90, green: 0.30, blue: 0.28)
+            case "File": return Color(red: 0.30, green: 0.50, blue: 0.80); default: return Color(red: 0.93, green: 0.62, blue: 0.20) }
+        }()
     }
 
-    private var bottom: some View {
-        HStack(spacing: 4) {
-            Spacer()
-            Image(systemName: bottomSymbol).font(.system(size: 9)).foregroundStyle(.secondary)
-            if let number { Text("\(number)").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary) }
+    /// Type and spacing grow with the card so a big card never looks empty.
+    private var scale: CGFloat { min(max(model.cardHeight / 250, 1), 1.5) }
+
+    private var expanded: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.record.title ?? kindLabel).font(.system(size: 17 * min(scale, 1.2), weight: .semibold)).lineLimit(1)
+                    Text((card.record.title == nil ? "" : kindLabel + " · ") + longAge).font(.system(size: 12 * min(scale, 1.2))).opacity(0.85).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                appIcon(42).shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 10).frame(height: 66)
+            .background(LinearGradient(colors: [headerColor, headerColor.opacity(0.86)], startPoint: .top, endPoint: .bottom))
+
+            expandedBody.frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            ZStack {
+                Text(footer).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                HStack { Spacer(); if let number { Text("⌘\(number)").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary) } }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
         }
-        .padding(.horizontal, 11).padding(.vertical, 7)
+        .background(Color(white: 0.13))
+    }
+
+    @ViewBuilder private var expandedBody: some View {
+        let s = scale
+        if let preview {
+            if let image = preview.image {
+                Image(nsImage: image).resizable().scaledToFill().frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                    .overlay(alignment: .bottom) {
+                        if let size = preview.imageSize {
+                            Text("\(Int(size.width)) × \(Int(size.height))").font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
+                                .padding(.horizontal, 10).padding(.vertical, 4).background(.black.opacity(0.45), in: Capsule()).padding(.bottom, 10)
+                        }
+                    }
+            } else if !preview.fileNames.isEmpty {
+                VStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    if let thumb = preview.fileImage { Image(nsImage: thumb).resizable().scaledToFit().frame(maxHeight: 130 * s).shadow(radius: 6, y: 3) }
+                    Text(preview.fileNames.first ?? "").font(.system(size: 15 * s, weight: .semibold)).lineLimit(2).multilineTextAlignment(.center)
+                    if let path = preview.filePaths.first {
+                        Text(path).font(.system(size: 11 * s)).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).multilineTextAlignment(.center)
+                    }
+                    Spacer(minLength: 0)
+                }.padding(14)
+            } else if preview.isLink {
+                VStack(spacing: 0) {
+                    ZStack {
+                        LinearGradient(colors: [headerColor.opacity(0.38), headerColor.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Image(systemName: "globe").font(.system(size: 54 * s, weight: .ultraLight)).foregroundStyle(.white.opacity(0.85))
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(linkHost(preview.text)).font(.system(size: 16 * s, weight: .semibold)).lineLimit(1)
+                        Text(preview.text).font(.system(size: 11 * s)).foregroundStyle(.secondary).lineLimit(2)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                }
+            } else {
+                let parts = preview.text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).map(String.init)
+                let code = looksLikeCode(preview.text)
+                VStack(alignment: .leading, spacing: 8 * s) {
+                    if parts.count == 2, !code {
+                        Text(parts[0]).font(.system(size: 17 * s, weight: .semibold))
+                        Text(parts[1]).font(.system(size: 14.5 * s))
+                    } else {
+                        Text(preview.text.isEmpty ? "(no text)" : preview.text)
+                            .font(.system(size: (code ? 13 : 16) * s, design: code ? .monospaced : .default))
+                    }
+                }
+                .multilineTextAlignment(.leading).lineSpacing(2)
+                .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        } else {
+            ProgressView().controlSize(.small)
+        }
+    }
+
+    // MARK: shared pieces
+
+    @ViewBuilder private func appIcon(_ size: CGFloat) -> some View {
+        if let icon = PreviewStore.shared.icon(bundleID: card.record.appBundleID) {
+            Image(nsImage: icon).resizable().frame(width: size, height: size)
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -291,7 +450,7 @@ struct CardView: View {
             } else {
                 Text(preview.text.isEmpty ? "(no text)" : preview.text)
                     .font(.system(size: 12, design: looksLikeCode(preview.text) ? .monospaced : .default))
-                    .lineLimit(9).multilineTextAlignment(.leading)
+                    .lineLimit(max(6, Int((model.cardHeight - 80) / 15))).multilineTextAlignment(.leading)
             }
         } else {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -309,19 +468,35 @@ struct CardView: View {
         switch kindLabel { case "Image": return "photo"; case "File": return "doc"; case "Link": return "link"; default: return "text.alignleft" }
     }
 
+    private var footer: String {
+        guard let preview else { return "" }
+        if let size = preview.imageSize, preview.image != nil { return model.expanded ? "" : "\(Int(size.width)) × \(Int(size.height))" }
+        if !preview.fileNames.isEmpty { return "\(preview.fileNames.count) file\(preview.fileNames.count == 1 ? "" : "s")" }
+        if preview.isLink { return linkHost(preview.text) }
+        return "\(preview.charCount) characters"
+    }
+
+    private var ageSeconds: Double { max(0, Date().timeIntervalSince1970 - card.record.copiedAt) }
+
     private var compactAge: String {
-        let seconds = max(0, Date().timeIntervalSince1970 - card.record.copiedAt)
-        switch seconds {
+        switch ageSeconds {
         case ..<60: return "now"
-        case ..<3600: return "\(Int(seconds / 60))m"
-        case ..<86_400: return "\(Int(seconds / 3600))h"
-        case ..<2_592_000: return "\(Int(seconds / 86_400))d"
-        default: return "\(Int(seconds / 2_592_000))mo"
+        case ..<3600: return "\(Int(ageSeconds / 60))m"
+        case ..<86_400: return "\(Int(ageSeconds / 3600))h"
+        case ..<2_592_000: return "\(Int(ageSeconds / 86_400))d"
+        default: return "\(Int(ageSeconds / 2_592_000))mo"
         }
+    }
+
+    private var longAge: String {
+        if ageSeconds < 60 { return "just now" }
+        return RelativeDateTimeFormatter.full.localizedString(for: Date(timeIntervalSince1970: card.record.copiedAt), relativeTo: Date())
     }
 
     private func linkHost(_ text: String) -> String { URL(string: text)?.host ?? text }
     private func looksLikeCode(_ text: String) -> Bool { text.contains("{") || text.contains("$ ") || text.contains("=>") || text.contains("();") || text.hasPrefix("#!") }
+
+    // MARK: menus and popovers
 
     @ViewBuilder private var menu: some View {
         if model.inTrash {
@@ -329,6 +504,7 @@ struct CardView: View {
         } else {
             Button("Paste") { model.selection = card.id; model.pasteSelected(plain: false) }
             Button("Paste as Plain Text") { model.selection = card.id; model.pasteSelected(plain: true) }
+            Button("Copy") { model.copy(card.record) }
             Divider()
             if model.canEdit(card.record) { Button("Edit…") { model.beginEdit(card.id) } }
             Button("Rename…") { renameText = card.record.title ?? ""; model.renamingID = card.id }
@@ -342,8 +518,30 @@ struct CardView: View {
                 Button("Create Pinboard…") { model.pendingPinClipID = card.id; model.addingBoard = true }
             }
             Divider()
+            Button("Quick Look") { model.selection = card.id; model.quickLookID = card.id }
+            if let preview {
+                if let image = preview.image {
+                    ShareLink(item: Image(nsImage: image), preview: SharePreview("Image", image: Image(nsImage: image)))
+                } else if !preview.text.isEmpty {
+                    ShareLink(item: preview.text)
+                }
+            }
+            Divider()
             Button("Delete", role: .destructive) { model.delete(card.id) }
         }
+    }
+
+    private var editPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Edit text").font(.headline)
+            TextEditor(text: $model.editText).font(.system(size: 12, design: .monospaced)).frame(width: 380, height: 240)
+            HStack {
+                Text("The original stays in your library.").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") { model.editingID = nil }
+                Button("Save") { model.edit(card.id, text: model.editText) }.keyboardShortcut(.defaultAction)
+            }
+        }.padding(14)
     }
 
     private var renamePopover: some View {
@@ -353,4 +551,70 @@ struct CardView: View {
             HStack { Spacer(); Button("Save") { model.rename(card.id, to: renameText) }.keyboardShortcut(.defaultAction) }
         }.padding(14)
     }
+}
+
+/// Space on a card: a larger look at the full content.
+struct QuickLookView: View {
+    let card: ShelfCard
+    @ObservedObject var model: ShelfModel
+    @State private var preview: Preview?
+    @State private var fullText: String?
+    @State private var fullImage: NSImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(card.record.title ?? "Quick Look").font(.headline).lineLimit(1)
+                Spacer()
+                if let path = preview?.filePaths.first {
+                    Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+                }
+                if let preview, preview.isLink, let url = URL(string: preview.text) {
+                    Button("Open") { NSWorkspace.shared.open(url) }
+                }
+                Button("Copy") { model.copy(card.record) }
+            }
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(16).frame(width: 580, height: 440)
+        .shelfGlass(cornerRadius: 22)
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.12)))
+        .preferredColorScheme(.dark)
+        .onAppear { PreviewStore.shared.load(card.record) { preview = $0 } }
+        .task {
+            let engine = model.engine, record = card.record
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (String, NSImage?) in
+                let text = String(engine.text(of: record).prefix(200_000))
+                return (text, engine.imageData(of: record).flatMap { NSImage(data: $0) })
+            }.value
+            fullText = loaded.0
+            fullImage = loaded.1
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let image = fullImage {
+            Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8))
+        } else if let preview, !preview.filePaths.isEmpty {
+            VStack(spacing: 10) {
+                if let thumb = preview.fileImage { Image(nsImage: thumb).resizable().scaledToFit().frame(maxHeight: 200) }
+                ForEach(preview.filePaths, id: \.self) { Text($0).font(.system(size: 12)).textSelection(.enabled).lineLimit(2).truncationMode(.middle) }
+            }
+        } else if let text = fullText {
+            ScrollView {
+                Text(text).font(.system(size: 13, design: text.contains("{") || text.contains("$ ") ? .monospaced : .default))
+                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            ProgressView()
+        }
+    }
+}
+
+extension RelativeDateTimeFormatter {
+    static let full: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
 }

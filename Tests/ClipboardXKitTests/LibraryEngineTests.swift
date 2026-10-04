@@ -116,6 +116,56 @@ final class LibraryEngineTests: XCTestCase {
         XCTAssertEqual(try engine.recent(board: nil, limit: 10).map(\.id), [rec.id])
     }
 
+    // MARK: filters
+
+    private func fileItem(_ url: String) -> [PasteboardItem] {
+        [PasteboardItem(types: ["public.file-url"], dataByType: ["public.file-url": Data(url.utf8)])]
+    }
+
+    private func imageItem() -> [PasteboardItem] {
+        [PasteboardItem(types: ["public.png"], dataByType: ["public.png": Data([0x89, 0x50, 0x4E, 0x47, 9])])]
+    }
+
+    private func seedMixed() throws {
+        let safari = SourceApp(bundleID: "com.apple.Safari", name: "Safari", iconPNG: nil)
+        _ = try engine.capture(items: textItem("meeting notes"), source: terminal, now: 100)
+        _ = try engine.capture(items: textItem("https://swift.org/blog"), source: safari, now: 200)
+        _ = try engine.capture(items: imageItem(), source: safari, now: 300)
+        _ = try engine.capture(items: fileItem("file:///Users/demo/Roadmap.pdf"), source: terminal, now: 400)
+    }
+
+    func testFilterByKind() throws {
+        try seedMixed()
+        func texts(_ kinds: Set<ClipKind>) throws -> [String] {
+            try engine.recent(board: nil, limit: 10, filters: ClipFilters(kinds: kinds)).map { engine.text(of: $0) }
+        }
+        XCTAssertEqual(try texts([.link]), ["https://swift.org/blog"])
+        XCTAssertEqual(try texts([.text]), ["meeting notes"])
+        XCTAssertEqual(try texts([.file]), ["/Users/demo/Roadmap.pdf"])
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10, filters: ClipFilters(kinds: [.image])).count, 1)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10, filters: ClipFilters(kinds: [.link, .image])).count, 2)
+    }
+
+    func testFilterByAppAndDate() throws {
+        try seedMixed()
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10, filters: ClipFilters(appName: "safari")).count, 2)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10, filters: ClipFilters(after: 250)).count, 2)
+        XCTAssertEqual(try engine.recent(board: nil, limit: 10, filters: ClipFilters(after: 150, before: 350)).count, 2)
+    }
+
+    func testFiltersCombineWithTextSearch() throws {
+        try seedMixed()
+        XCTAssertEqual(try engine.search("swift", board: nil, limit: 10, filters: ClipFilters(kinds: [.link])).count, 1)
+        XCTAssertEqual(try engine.search("swift", board: nil, limit: 10, filters: ClipFilters(kinds: [.text])).count, 0)
+        XCTAssertEqual(try engine.search("meeting", board: nil, limit: 10, filters: ClipFilters(appName: "terminal")).count, 1)
+    }
+
+    func testAppsInUseListsOnlyAppsWithClips() throws {
+        try seedMixed()
+        try engine.registerApp(SourceApp(bundleID: "com.apple.Notes", name: "Notes", iconPNG: nil))
+        XCTAssertEqual(try engine.appsInUse().map(\.name), ["Safari", "Terminal"])
+    }
+
     // MARK: background index rebuild
 
     private func waitUntil(timeout: TimeInterval = 15, _ condition: () -> Bool) throws {

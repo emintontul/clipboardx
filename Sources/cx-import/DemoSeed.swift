@@ -26,6 +26,8 @@ enum DemoSeed {
             Clip(text: "Ship the beta on Friday. Ask design for the final icon set.", app: "com.apple.Notes", minutesAgo: 1500),
             Clip(text: "ssh deploy@staging.example.com -p 2222", app: "com.apple.Terminal", minutesAgo: 1440, title: "Staging server"),
             Clip(text: "SELECT count(*) FROM clips WHERE pinned = 1;", app: "com.apple.dt.Xcode", minutesAgo: 360, title: "Count pinned"),
+            Clip(text: "enum DayOfWeek: CaseIterable {\n    case monday, tuesday, wednesday\n    case thursday, friday\n}", app: "com.apple.dt.Xcode", minutesAgo: 340),
+            Clip(text: "Project kick-off meeting\nPlease join us on Friday at 10 am for the kick-off in the third-floor room. We will cover scope, timeline and owners. Water and light refreshments will be provided.", app: "com.apple.Notes", minutesAgo: 320),
             Clip(text: "https://swift.org/blog/swift-6/", app: "com.apple.Safari", minutesAgo: 300),
             Clip(text: "Call Alex about the lease before Friday", app: "com.apple.Notes", minutesAgo: 180),
             Clip(text: "docker compose up -d && docker compose logs -f api", app: "com.apple.Terminal", minutesAgo: 120),

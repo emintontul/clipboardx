@@ -15,6 +15,39 @@ enum BoardPalette {
     static func next(after count: Int) -> UInt32 { colors[count % colors.count].code }
 }
 
+enum DatePreset: String, CaseIterable, Identifiable {
+    case today = "Today", yesterday = "Yesterday", lastWeek = "Last week", lastMonth = "Last month"
+    var id: String { rawValue }
+    var symbol: String { "calendar" }
+
+    /// The `[after, before)` window in seconds since 1970.
+    func range(now: Date = Date(), calendar: Calendar = .current) -> (after: Double, before: Double?) {
+        let start = calendar.startOfDay(for: now)
+        func back(_ days: Int) -> Double { (calendar.date(byAdding: .day, value: -days, to: start) ?? start).timeIntervalSince1970 }
+        switch self {
+        case .today: return (start.timeIntervalSince1970, nil)
+        case .yesterday: return (back(1), start.timeIntervalSince1970)
+        case .lastWeek: return (back(7), nil)
+        case .lastMonth: return (back(30), nil)
+        }
+    }
+}
+
+struct FilterSuggestion: Identifiable {
+    enum Kind { case kind(ClipKind), app(String), date(DatePreset) }
+    let kind: Kind
+    let title: String
+    let symbol: String
+    var id: String { title + symbol }
+}
+
+extension ClipKind {
+    var title: String { rawValue.capitalized }
+    var symbol: String {
+        switch self { case .text: return "text.alignleft"; case .link: return "link"; case .image: return "photo"; case .file: return "doc" }
+    }
+}
+
 /// State behind the shelf. Everything runs on the main thread; queries take a few milliseconds.
 final class ShelfModel: ObservableObject {
     static let historyID = "sharedPasteboardHistory"
@@ -36,8 +69,24 @@ final class ShelfModel: ObservableObject {
     @Published var addingBoard = false
     @Published private(set) var indexing = false
     @Published private(set) var indexingProgress = 0.0
+    @Published var kindFilters: Set<ClipKind> = [] { didSet { reload(resetSelection: true) } }
+    @Published var appFilter: String? { didSet { reload(resetSelection: true) } }
+    @Published var datePreset: DatePreset? { didSet { reload(resetSelection: true) } }
+    @Published var shelfHeight: CGFloat = 276
+    @Published var quickLookID: String?
+    @Published private(set) var appsInUse: [AppRecord] = []
     private var limit = 60
     private var indexTimer: Timer?
+    var onResizeDrag: (() -> Void)?
+    var onResizeEnd: (() -> Void)?
+    var onCopy: ((ClipRecord) -> Void)?
+
+    static let expandedThreshold: CGFloat = 330
+    var expanded: Bool { shelfHeight >= Self.expandedThreshold }
+    var cardHeight: CGFloat { min(max(190, shelfHeight - 78), 380) }
+    /// Cards stay square at every shelf height, so a taller shelf gives bigger cards, never tall narrow ones.
+    var cardWidth: CGFloat { cardHeight }
+    var hasFilters: Bool { !kindFilters.isEmpty || appFilter != nil || datePreset != nil }
     var onPaste: ((ClipRecord, Bool) -> Void)?
     var onOpenSettings: (() -> Void)?
 
@@ -91,17 +140,31 @@ final class ShelfModel: ObservableObject {
         selectBoard((boardIndex + delta + boards.count) % boards.count)
     }
 
+    /// Chip filters plus anything typed as `type:link`, `app:Safari`, `last week`…, merged.
+    private func effective() -> (text: String, filters: ClipFilters) {
+        let parsed = QueryParser.parse(query)
+        var f = ClipFilters(kinds: kindFilters.union(parsed.filters.kinds), appName: parsed.filters.appName ?? appFilter,
+                            after: parsed.filters.after, before: parsed.filters.before)
+        if let preset = datePreset {
+            let r = preset.range()
+            f.after = max(f.after ?? r.after, r.after)
+            f.before = [f.before, r.before].compactMap { $0 }.min()
+        }
+        return (parsed.text, f)
+    }
+
     func reload(resetSelection: Bool) {
         let board = currentBoard?.id
+        let (text, f) = effective()
         let records: [ClipRecord]
-        if query.trimmingCharacters(in: .whitespaces).isEmpty {
-            records = (try? engine.recent(board: board, limit: limit)) ?? []
+        if text.trimmingCharacters(in: .whitespaces).isEmpty {
+            records = (try? engine.recent(board: board, limit: limit, filters: f)) ?? []
         } else {
-            records = (try? engine.search(query, board: board, limit: limit)) ?? []
+            records = (try? engine.search(text, board: board, limit: limit, filters: f)) ?? []
         }
         cards = records.map { ShelfCard(record: $0, appName: $0.appBundleID.flatMap { (try? engine.app(bundleID: $0))?.name }) }
         if resetSelection || !cards.contains(where: { $0.id == selection }) { selection = cards.first?.id }
-        statusLine = query.isEmpty ? "" : "\(cards.count) result\(cards.count == 1 ? "" : "s")"
+        statusLine = (query.isEmpty && !hasFilters) ? "" : "\(cards.count) result\(cards.count == 1 ? "" : "s")"
     }
 
     /// Called when the end of the strip scrolls into view.
@@ -126,6 +189,68 @@ final class ShelfModel: ObservableObject {
         guard cards.indices.contains(index) else { return }
         onPaste?(cards[index].record, plain || settings.alwaysPlainText)
     }
+
+    // MARK: filters and suggestions
+
+    /// Completions for the word being typed: date phrases ("L" gives Last week, Last month), types and apps.
+    var suggestions: [FilterSuggestion] {
+        let words = query.split(separator: " ").map(String.init)
+        guard let last = words.last, !query.hasSuffix(" ") else { return [] }
+        let two = words.count >= 2 ? (words[words.count - 2] + " " + last).lowercased() : ""
+        let one = last.lowercased()
+        var out: [FilterSuggestion] = []
+        for preset in DatePreset.allCases where preset.rawValue.lowercased().hasPrefix(one) || (!two.isEmpty && preset.rawValue.lowercased().hasPrefix(two)) {
+            out.append(FilterSuggestion(kind: .date(preset), title: preset.rawValue, symbol: preset.symbol))
+        }
+        for kind in ClipKind.allCases where kind.rawValue.hasPrefix(one) {
+            out.append(FilterSuggestion(kind: .kind(kind), title: kind.title, symbol: kind.symbol))
+        }
+        if one.count >= 2 {
+            for app in appsInUse where app.name.lowercased().hasPrefix(one) {
+                out.append(FilterSuggestion(kind: .app(app.name), title: app.name, symbol: "app"))
+            }
+        }
+        return Array(out.prefix(6))
+    }
+
+    func apply(_ suggestion: FilterSuggestion) {
+        var words = query.split(separator: " ").map(String.init)
+        if case .date = suggestion.kind, words.count >= 2, suggestion.title.lowercased().hasPrefix((words[words.count - 2] + " " + words[words.count - 1]).lowercased()) {
+            words.removeLast(2)
+        } else if !words.isEmpty { words.removeLast() }
+        query = words.joined(separator: " ")
+        switch suggestion.kind {
+        case .kind(let k): kindFilters.insert(k)
+        case .app(let name): appFilter = name
+        case .date(let preset): datePreset = preset
+        }
+    }
+
+    func clearFilters() { kindFilters = []; appFilter = nil; datePreset = nil }
+
+    /// Backspace on an empty search field removes the last chip. Returns whether it did.
+    func removeLastFilter() -> Bool {
+        if datePreset != nil { datePreset = nil } else if appFilter != nil { appFilter = nil }
+        else if let kind = kindFilters.sorted(by: { $0.rawValue < $1.rawValue }).last { kindFilters.remove(kind) } else { return false }
+        return true
+    }
+
+    func refreshApps() { appsInUse = (try? engine.appsInUse()) ?? [] }
+
+    // MARK: quick look and copy
+
+    func toggleQuickLook() {
+        if quickLookID != nil { quickLookID = nil } else { quickLookID = selection }
+    }
+
+    /// Esc closes Quick Look first; returns whether it was open.
+    func closeQuickLook() -> Bool {
+        guard quickLookID != nil else { return false }
+        quickLookID = nil
+        return true
+    }
+
+    func copy(_ record: ClipRecord) { onCopy?(record) }
 
     // MARK: clips
 
@@ -230,7 +355,10 @@ final class ShelfModel: ObservableObject {
         renamingID = nil
         editingID = nil
         renamingBoardID = nil
+        quickLookID = nil
+        kindFilters = []; appFilter = nil; datePreset = nil
         refreshBoards()
+        refreshApps()
         reload(resetSelection: true)
     }
 }

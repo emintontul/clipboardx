@@ -43,7 +43,7 @@ public enum SearchScope: Equatable, Sendable {
 public final class SearchIndex {
     public enum IndexError: Error { case outdated }
 
-    public static let schemaVersion = 3
+    public static let schemaVersion = 4
     private static let bodyLimit = 8_000
     private let db: SQLiteDatabase
     private var appNames: Set<String>?
@@ -65,7 +65,7 @@ public final class SearchIndex {
         CREATE TABLE IF NOT EXISTS docs(
           rowid INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, title TEXT, board TEXT, board_order INTEGER, copied REAL NOT NULL,
           title_c TEXT NOT NULL, body_c TEXT NOT NULL, app_c TEXT NOT NULL, title_n TEXT NOT NULL, body_n TEXT NOT NULL,
-          rec TEXT NOT NULL DEFAULT '', fp TEXT, deleted_at REAL)
+          rec TEXT NOT NULL DEFAULT '', fp TEXT, deleted_at REAL, kind TEXT NOT NULL DEFAULT 'text', app_id TEXT)
         """)
         try db.execute("CREATE INDEX IF NOT EXISTS docs_copied ON docs(copied DESC)")
         try db.execute("CREATE INDEX IF NOT EXISTS docs_title ON docs(title_c) WHERE title_c <> ''")
@@ -148,6 +148,17 @@ public final class SearchIndex {
         return value
     }
 
+    /// Apps that have at least one live clip, for the app filter list.
+    public func appsInUse() throws -> [AppRecord] {
+        var out: [AppRecord] = []
+        try db.query("""
+        SELECT a.bundle,a.name,a.icon FROM apps a
+        WHERE EXISTS (SELECT 1 FROM docs d WHERE d.app_id = a.bundle AND d.deleted_at IS NULL)
+        ORDER BY a.name COLLATE NOCASE
+        """) { out.append(AppRecord(bundleID: $0.text(0) ?? "", name: $0.text(1) ?? "", iconBlob: $0.text(2))) }
+        return out
+    }
+
     /// Ids of trashed clips deleted before `cutoff` (seconds since 1970).
     public func expiredTrashIDs(before cutoff: Double) throws -> [String] {
         var ids: [String] = []
@@ -188,8 +199,8 @@ public final class SearchIndex {
         return ids.compactMap { byID[$0] }
     }
 
-    public func recentRecords(scope: SearchScope, limit: Int, offset: Int = 0) throws -> [ClipRecord] {
-        let (clause, params) = Self.clause(scope)
+    public func recentRecords(scope: SearchScope, limit: Int, offset: Int = 0, filters: ClipFilters = ClipFilters()) throws -> [ClipRecord] {
+        let (clause, params) = Self.clause(scope, filters)
         let order: String
         switch scope {
         case .board: order = "COALESCE(d.board_order, 1000000), d.copied DESC"
@@ -202,13 +213,13 @@ public final class SearchIndex {
         return try records(ids: ids)
     }
 
-    public func search(_ query: String, limit: Int, scope: SearchScope = .all) throws -> [SearchHit] {
+    public func search(_ query: String, limit: Int, scope: SearchScope = .all, filters: ClipFilters = ClipFilters()) throws -> [SearchHit] {
         let qc = TextNormalizer.compact(query)
         let tokens = TextNormalizer.tokens(query)
-        if qc.isEmpty { return try newest(limit: limit, scope: scope) }
-        var hits = try candidates(qc: qc, tokens: tokens, scope: scope).compactMap { score($0, qc: qc, tokens: tokens) }
+        if qc.isEmpty { return try newest(limit: limit, scope: scope, filters: filters) }
+        var hits = try candidates(qc: qc, tokens: tokens, scope: scope, filters: filters).compactMap { score($0, qc: qc, tokens: tokens) }
         if hits.count < 3, qc.count >= 4 {
-            hits += try fuzzyCandidates(qc: qc, scope: scope).compactMap { fuzzyScore($0, qc: qc) }
+            hits += try fuzzyCandidates(qc: qc, scope: scope, filters: filters).compactMap { fuzzyScore($0, qc: qc) }
         }
         var seen = Set<String>()
         return hits.sorted { $0.score != $1.score ? $0.score > $1.score : $0.copiedAt > $1.copiedAt }
@@ -228,12 +239,13 @@ public final class SearchIndex {
         let bodyN = TextNormalizer.fold(body)
         let json = (try? doc.record.map { String(decoding: try encoder.encode($0), as: UTF8.self) }) ?? nil
         try db.execute("""
-        INSERT INTO docs(id,title,board,board_order,copied,title_c,body_c,app_c,title_n,body_n,rec,fp,deleted_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO docs(id,title,board,board_order,copied,title_c,body_c,app_c,title_n,body_n,rec,fp,deleted_at,kind,app_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, [.text(doc.id), doc.title.map(SQLValue.text) ?? .null, doc.board.map(SQLValue.text) ?? .null,
               doc.boardOrder.map(SQLValue.int) ?? .null, .double(doc.copiedAt), .text(titleC), .text(bodyC), .text(appC),
               .text(titleN), .text(bodyN), .text(json ?? ""), doc.record.map { .text($0.fingerprint) } ?? .null,
-              doc.deletedAt.map(SQLValue.double) ?? .null])
+              doc.deletedAt.map(SQLValue.double) ?? .null, .text(ClipKind.of(doc.record, text: doc.text).rawValue),
+              doc.record?.appBundleID.map(SQLValue.text) ?? .null])
         if !appC.isEmpty { appNames?.insert(appC) }
         var rowid = 0
         try db.query("SELECT rowid FROM docs WHERE id=?", [.text(doc.id)]) { rowid = $0.int(0) ?? 0 }
@@ -256,13 +268,22 @@ public final class SearchIndex {
 
     private static let rowColumns = "d.id,d.copied,d.title_c,d.app_c"
 
-    private static func clause(_ scope: SearchScope) -> (String, [SQLValue]) {
+    private static func clause(_ scope: SearchScope, _ filters: ClipFilters = ClipFilters()) -> (String, [SQLValue]) {
+        var sql: String, params: [SQLValue] = []
         switch scope {
-        case .all: return (" AND d.deleted_at IS NULL", [])
-        case .history: return (" AND d.board IS NULL AND d.deleted_at IS NULL", [])
-        case .board(let id): return (" AND d.board = ? AND d.deleted_at IS NULL", [.text(id)])
-        case .trash: return (" AND d.deleted_at IS NOT NULL", [])
+        case .all: sql = " AND d.deleted_at IS NULL"
+        case .history: sql = " AND d.board IS NULL AND d.deleted_at IS NULL"
+        case .board(let id): sql = " AND d.board = ? AND d.deleted_at IS NULL"; params = [.text(id)]
+        case .trash: sql = " AND d.deleted_at IS NOT NULL"
         }
+        if !filters.kinds.isEmpty {
+            sql += " AND d.kind IN (" + Array(repeating: "?", count: filters.kinds.count).joined(separator: ",") + ")"
+            params += filters.kinds.map { SQLValue.text($0.rawValue) }.sorted { "\($0)" < "\($1)" }
+        }
+        if let app = filters.appName, !TextNormalizer.compact(app).isEmpty { sql += " AND d.app_c LIKE ?"; params.append(.text("%" + TextNormalizer.compact(app) + "%")) }
+        if let after = filters.after { sql += " AND d.copied >= ?"; params.append(.double(after)) }
+        if let before = filters.before { sql += " AND d.copied < ?"; params.append(.double(before)) }
+        return (sql, params)
     }
 
     private func candidateRows(_ sql: String, _ params: [SQLValue] = []) throws -> [Candidate] {
@@ -273,24 +294,24 @@ public final class SearchIndex {
         return out
     }
 
-    private func newest(limit: Int, scope: SearchScope) throws -> [SearchHit] {
-        let (clause, params) = Self.clause(scope)
+    private func newest(limit: Int, scope: SearchScope, filters: ClipFilters) throws -> [SearchHit] {
+        let (clause, params) = Self.clause(scope, filters)
         return try candidateRows("SELECT \(Self.rowColumns) FROM docs d WHERE 1=1 \(clause) ORDER BY d.copied DESC LIMIT ?", params + [.int(limit)])
             .map { SearchHit(id: $0.id, score: 1, reasons: [], copiedAt: $0.copied) }
     }
 
     private static func phrase(_ text: String) -> String { "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
 
-    private func match(_ expression: String, limit: Int, scope: SearchScope) throws -> [Candidate] {
-        let (clause, params) = Self.clause(scope)
+    private func match(_ expression: String, limit: Int, scope: SearchScope, filters: ClipFilters) throws -> [Candidate] {
+        let (clause, params) = Self.clause(scope, filters)
         return try candidateRows("""
         SELECT \(Self.rowColumns) FROM fts JOIN docs d ON d.rowid=fts.rowid
         WHERE fts MATCH ? \(clause) ORDER BY fts.rowid DESC LIMIT ?
         """, [.text(expression)] + params + [.int(limit)])
     }
 
-    private func candidates(qc: String, tokens: [String], scope: SearchScope) throws -> [Candidate] {
-        guard qc.count >= 3 else { return try shortCandidates(qc, scope: scope) }
+    private func candidates(qc: String, tokens: [String], scope: SearchScope, filters: ClipFilters) throws -> [Candidate] {
+        guard qc.count >= 3 else { return try shortCandidates(qc, scope: scope, filters: filters) }
         var merged: [String: Candidate] = [:]
         func add(_ rows: [Candidate], body: Bool = false, tokens: Bool = false) {
             for var row in rows {
@@ -301,23 +322,23 @@ public final class SearchIndex {
                 merged[row.id] = row
             }
         }
-        add(try match("title_c : \(Self.phrase(qc))", limit: 100, scope: scope))
-        add(try match("app_c : \(Self.phrase(qc))", limit: 50, scope: scope))
-        add(try match("body_c : \(Self.phrase(qc))", limit: 150, scope: scope), body: true)
+        add(try match("title_c : \(Self.phrase(qc))", limit: 100, scope: scope, filters: filters))
+        add(try match("app_c : \(Self.phrase(qc))", limit: 50, scope: scope, filters: filters))
+        add(try match("body_c : \(Self.phrase(qc))", limit: 150, scope: scope, filters: filters), body: true)
         let long = tokens.filter { $0.count >= 3 }
         if tokens.count > 1, long.count == tokens.count {
             let body = long.map { "body_n : \(Self.phrase($0))" }.joined(separator: " AND ")
             let title = long.map { "title_n : \(Self.phrase($0))" }.joined(separator: " AND ")
-            add(try match("(\(body)) OR (\(title))", limit: 150, scope: scope), tokens: true)
+            add(try match("(\(body)) OR (\(title))", limit: 150, scope: scope, filters: filters), tokens: true)
         }
         return Array(merged.values)
     }
 
     /// One or two characters: trigram cannot index these. Fields use partial indexes; one character never searches
     /// bodies, two characters only the newest 60.
-    private func shortCandidates(_ qc: String, scope: SearchScope) throws -> [Candidate] {
+    private func shortCandidates(_ qc: String, scope: SearchScope, filters: ClipFilters) throws -> [Candidate] {
         let like = SQLValue.text("%" + qc.replacingOccurrences(of: "%", with: "") + "%")
-        let (clause, scopeParams) = Self.clause(scope)
+        let (clause, scopeParams) = Self.clause(scope, filters)
         let apps = try knownApps().filter { $0.contains(qc) }.sorted()
         var fields = try candidateRows("""
         SELECT \(Self.rowColumns) FROM docs d INDEXED BY docs_title WHERE d.title_c <> '' AND d.title_c LIKE ? \(clause)
@@ -344,10 +365,10 @@ public final class SearchIndex {
         return names
     }
 
-    private func fuzzyCandidates(qc: String, scope: SearchScope) throws -> [Candidate] {
+    private func fuzzyCandidates(qc: String, scope: SearchScope, filters: ClipFilters) throws -> [Candidate] {
         let grams = Self.trigrams(qc)
         guard !grams.isEmpty else { return [] }
-        return try match(grams.map { "title_c : \(Self.phrase($0))" }.joined(separator: " OR "), limit: 300, scope: scope)
+        return try match(grams.map { "title_c : \(Self.phrase($0))" }.joined(separator: " OR "), limit: 300, scope: scope, filters: filters)
     }
 
     private static func trigrams(_ text: String) -> [String] {

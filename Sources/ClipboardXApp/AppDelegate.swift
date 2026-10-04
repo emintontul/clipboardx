@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model = ShelfModel(engine: engine, settings: settings)
         shelf = ShelfController(model: model)
         model.onPaste = { [weak self] record, plain in self?.paste(record, plain: plain) }
+        model.onCopy = { [weak self] record in
+            guard let items = try? self?.engine.payload(of: record) else { return }
+            PasteAction.perform(items: items, plainText: false, autoPaste: false)
+        }
         model.onOpenSettings = { [weak self] in self?.shelf.hide(); self?.openSettings() }
 
         // Demo mode (screenshots) never records the real clipboard and never writes to the iCloud backup.
@@ -66,6 +70,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if env["CLIPBOARDX_DEMO_SETTINGS"] == "1" { self?.openSettings(); return }
                 self?.shelf.show(query: query)
                 if let board { self?.model.selectBoard(board) }
+                if let kind = env["CLIPBOARDX_DEMO_KIND"].flatMap(ClipKind.init(rawValue:)) { self?.model.kindFilters = [kind] }
+                if let app = env["CLIPBOARDX_DEMO_APP"] { self?.model.appFilter = app }
+                if let preset = env["CLIPBOARDX_DEMO_DATE"].flatMap({ raw in DatePreset.allCases.first { $0.rawValue == raw } }) { self?.model.datePreset = preset }
+                if env["CLIPBOARDX_DEMO_EDIT"] == "1" { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self?.model.editSelected() } }
+                if env["CLIPBOARDX_DEMO_QUICKLOOK"] == "1" { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self?.model.toggleQuickLook() } }
             }
         }
     }
