@@ -5,6 +5,15 @@ the way you remember them, and never deletes anything on its own.
 
 > **Status: early.** It is used daily by its author, but expect rough edges. See [Limitations](#limitations).
 
+![The ClipboardX shelf with pinboards and clips](docs/screenshots/shelf.png)
+
+Searching `Stag ing` finds the clip named `Staging server` (spacing is ignored):
+
+![Searching "Stag ing" finds "Staging server"](docs/screenshots/search.png)
+
+<sub>Screenshots use a made-up sample library, not real clipboard data. You can generate it yourself with
+`swift run cx-import demo --out <empty folder>`.</sub>
+
 ## Why
 
 - **Search that finds what you meant.** Typing `Togg Lite` finds a clip titled `ToggLite`. Spacing, punctuation, case,
