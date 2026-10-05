@@ -95,6 +95,10 @@ public final class SearchIndex {
                         board.attributesBlob.map(SQLValue.text) ?? .null])
     }
 
+    public func removeBoard(_ id: String) throws {
+        try db.execute("DELETE FROM boards WHERE id=?", [.text(id)])
+    }
+
     public func upsertApp(_ app: AppRecord) throws {
         try db.execute("INSERT OR REPLACE INTO apps(bundle,name,icon) VALUES(?,?,?)",
                        [.text(app.bundleID), .text(app.name), app.iconBlob.map(SQLValue.text) ?? .null])
@@ -117,6 +121,14 @@ public final class SearchIndex {
                                    createdAt: r.double(4) ?? 0, attributesBlob: r.text(5)))
         }
         return out
+    }
+
+    public func records(inBoard board: String) throws -> [ClipRecord] {
+        var ids: [String] = []
+        try db.query("SELECT id FROM docs WHERE board=? ORDER BY board_order, copied DESC", [.text(board)]) {
+            ids.append($0.text(0) ?? "")
+        }
+        return try records(ids: ids)
     }
 
     public func app(bundleID: String) throws -> AppRecord? {

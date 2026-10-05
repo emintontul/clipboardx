@@ -35,13 +35,14 @@ final class ShelfModel: ObservableObject {
     var currentBoard: BoardRecord? { boards.indices.contains(boardIndex) ? boards[boardIndex] : nil }
 
     func refreshBoards() {
+        let selectedBoardID = currentBoard?.id
         var list = (try? engine.boards()) ?? []
         if !list.contains(where: { $0.id == Self.historyID }) {
             list.insert(BoardRecord(id: Self.historyID, name: "Clipboard History", index: -1, kind: 1, createdAt: 0, attributesBlob: nil), at: 0)
         }
         boards = list
         boardColors = Dictionary(uniqueKeysWithValues: list.compactMap { board in engine.boardColorCode(board).map { (board.id, $0) } })
-        boardIndex = min(boardIndex, max(list.count - 1, 0))
+        boardIndex = selectedBoardID.flatMap { id in list.firstIndex { $0.id == id } } ?? min(boardIndex, max(list.count - 1, 0))
     }
 
     func selectBoard(_ index: Int) {
@@ -111,6 +112,29 @@ final class ShelfModel: ObservableObject {
         try? engine.addBoard(id: "list:" + UUID().uuidString, name: trimmed, colorCode: palette[boards.count % palette.count])
         refreshBoards()
         selectBoard(boards.count - 1)
+    }
+
+    func renameBoard(_ id: String, to name: String) {
+        try? engine.renameBoard(id, to: name)
+        refreshBoards()
+    }
+
+    func setBoardColor(_ id: String, to colorCode: UInt32) {
+        try? engine.setBoardColor(id, to: colorCode)
+        refreshBoards()
+    }
+
+    func moveBoard(_ id: String, by offset: Int) {
+        try? engine.moveBoard(id, by: offset)
+        refreshBoards()
+    }
+
+    func deleteBoard(_ id: String) {
+        let deletingCurrentBoard = currentBoard?.id == id
+        try? engine.deleteBoard(id)
+        refreshBoards()
+        if deletingCurrentBoard { boardIndex = 0 }
+        reload(resetSelection: true)
     }
 
     func resetForShow() {

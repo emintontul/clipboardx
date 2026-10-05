@@ -21,6 +21,7 @@ public enum IndexBuilder {
             switch event {
             case .app(let a): apps[a.bundleID] = a
             case .board(let b): boards[b.id] = b
+            case .boardDeleted(let id): boards.removeValue(forKey: id)
             case .put(let r): latest[r.id] = r
             }
         }

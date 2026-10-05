@@ -32,10 +32,32 @@ extension Color {
     }
 }
 
+private enum BoardPopover: Identifiable {
+    case rename(String)
+    case color(String)
+
+    var id: String {
+        switch self {
+        case .rename(let boardID): "rename:\(boardID)"
+        case .color(let boardID): "color:\(boardID)"
+        }
+    }
+
+    var boardID: String {
+        switch self {
+        case .rename(let boardID), .color(let boardID): boardID
+        }
+    }
+}
+
 struct ShelfView: View {
     @ObservedObject var model: ShelfModel
     @FocusState private var searchFocused: Bool
     @State private var newBoardName = ""
+    @State private var boardName = ""
+    @State private var boardColor = Color.gray
+    @State private var boardPopover: BoardPopover?
+    @State private var deletingBoard: BoardRecord?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -67,6 +89,18 @@ struct ShelfView: View {
         .shelfGlass(cornerRadius: 30)
         .preferredColorScheme(.dark)
         .onAppear { searchFocused = true }
+        .confirmationDialog("Delete Pinboard?", isPresented: Binding(
+            get: { deletingBoard != nil },
+            set: { if !$0 { deletingBoard = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete \(deletingBoard?.name ?? "")", role: .destructive) {
+                if let deletingBoard { model.deleteBoard(deletingBoard.id) }
+                deletingBoard = nil
+            }
+            Button("Cancel", role: .cancel) { deletingBoard = nil }
+        } message: {
+            Text("Its clips will return to Clipboard History.")
+        }
     }
 
     private var header: some View {
@@ -137,7 +171,68 @@ struct ShelfView: View {
             .padding(.horizontal, 11).padding(.vertical, 5)
             .background(selected ? Color.white.opacity(0.16) : Color.clear, in: Capsule())
             .foregroundStyle(selected ? Color.white : Color.white.opacity(0.72))
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Rename…") {
+                boardName = board.name
+                boardPopover = .rename(board.id)
+            }
+            Button("Change Color…") {
+                boardColor = model.boardColors[board.id].map(Color.init(argb:)) ?? .gray
+                boardPopover = .color(board.id)
+            }
+            Divider()
+            Button("Move Left") { model.moveBoard(board.id, by: -1) }.disabled(index <= 1)
+            Button("Move Right") { model.moveBoard(board.id, by: 1) }.disabled(index >= model.boards.count - 1)
+            Divider()
+            Button("Delete Pinboard…", role: .destructive) { deletingBoard = board }
+        }
+        .popover(item: Binding(
+            get: { boardPopover?.boardID == board.id ? boardPopover : nil },
+            set: { boardPopover = $0 }
+        )) { popover in
+            boardPopoverContent(popover)
+        }
+    }
+
+    @ViewBuilder private func boardPopoverContent(_ popover: BoardPopover) -> some View {
+        switch popover {
+        case .rename(let id):
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Rename Pinboard").font(.headline)
+                TextField("Name", text: $boardName).frame(width: 220)
+                    .onSubmit { model.renameBoard(id, to: boardName); boardPopover = nil }
+                HStack {
+                    Button("Cancel") { boardPopover = nil }
+                    Spacer()
+                    Button("Save") { model.renameBoard(id, to: boardName); boardPopover = nil }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }.padding(14)
+        case .color(let id):
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Pinboard Color").font(.headline)
+                ColorPicker("Color", selection: $boardColor, supportsOpacity: false)
+                HStack {
+                    Button("Cancel") { boardPopover = nil }
+                    Spacer()
+                    Button("Save") {
+                        if let code = Self.argbCode(for: boardColor) { model.setBoardColor(id, to: code) }
+                        boardPopover = nil
+                    }.keyboardShortcut(.defaultAction)
+                }
+            }.padding(14).frame(width: 240)
+        }
+    }
+
+    private static func argbCode(for color: Color) -> UInt32? {
+        guard let color = NSColor(color).usingColorSpace(.deviceRGB) else { return nil }
+        let alpha = UInt32((color.alphaComponent * 255).rounded())
+        let red = UInt32((color.redComponent * 255).rounded())
+        let green = UInt32((color.greenComponent * 255).rounded())
+        let blue = UInt32((color.blueComponent * 255).rounded())
+        return alpha << 24 | red << 16 | green << 8 | blue
     }
 
     private var newBoardPopover: some View {

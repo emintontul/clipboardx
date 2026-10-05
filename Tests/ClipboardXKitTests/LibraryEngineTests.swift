@@ -73,6 +73,59 @@ final class LibraryEngineTests: XCTestCase {
         XCTAssertEqual(engine.boardColorCode(try XCTUnwrap(try engine.boards().first { $0.id == "list:blue" })), 0xFF0A84FF)
     }
 
+    func testBoardCanBeRenamedRecoloredAndReordered() throws {
+        try engine.addBoard(id: "list:one", name: "One", colorCode: 0xFFFF453A)
+        try engine.addBoard(id: "list:two", name: "Two", colorCode: 0xFF32D74B)
+        try engine.addBoard(id: "list:three", name: "Three", colorCode: 0xFF0A84FF)
+
+        try engine.renameBoard("list:two", to: "Second")
+        try engine.setBoardColor("list:two", to: 0xFFBF5AF2)
+        try engine.moveBoard("list:three", by: -2)
+
+        let boards = try engine.boards()
+        XCTAssertEqual(boards.map(\.id), ["list:three", "list:one", "list:two"])
+        XCTAssertEqual(boards.last?.name, "Second")
+        XCTAssertEqual(engine.boardColorCode(try XCTUnwrap(boards.last)), 0xFFBF5AF2)
+
+        engine = nil
+        _ = try IndexBuilder.rebuild(library: dir)
+        engine = try LibraryEngine(library: dir, deviceID: "dev1")
+        XCTAssertEqual(try engine.boards().map(\.id), ["list:three", "list:one", "list:two"])
+        XCTAssertEqual(try engine.boards().last?.name, "Second")
+    }
+
+    func testBoardRenameRequiresNameAndMoveClampsAtEnds() throws {
+        try engine.addBoard(id: "list:one", name: "One")
+        try engine.addBoard(id: "list:two", name: "Two")
+
+        XCTAssertThrowsError(try engine.renameBoard("list:one", to: " \n "))
+        try engine.moveBoard("list:one", by: Int.min)
+        try engine.moveBoard("list:two", by: Int.max)
+
+        XCTAssertEqual(try engine.boards().map(\.id), ["list:one", "list:two"])
+    }
+
+    func testDeletingBoardReturnsClipsToHistoryAndSurvivesRebuild() throws {
+        try engine.addBoard(id: "list:links", name: "Links")
+        let original = try XCTUnwrap(try engine.capture(items: textItem("https://example.com"), source: terminal, now: 10))
+        let pinned = try engine.pin(original.id, to: "list:links")
+        XCTAssertEqual(try engine.recent(board: "list:links", limit: 10).map(\.id), [pinned.id])
+
+        try engine.deleteBoard("list:links")
+
+        XCTAssertFalse(try engine.boards().contains { $0.id == "list:links" })
+        XCTAssertTrue(try engine.recent(board: "list:links", limit: 10).isEmpty)
+        XCTAssertEqual(Set(try engine.recent(board: nil, limit: 10).map(\.id)), Set([original.id, pinned.id]))
+        XCTAssertEqual(engine.text(of: try XCTUnwrap(try engine.recent(board: nil, limit: 10).first { $0.id == pinned.id })), "https://example.com")
+
+        engine = nil
+        _ = try IndexBuilder.rebuild(library: dir)
+        engine = try LibraryEngine(library: dir, deviceID: "dev1")
+        XCTAssertFalse(try engine.boards().contains { $0.id == "list:links" })
+        XCTAssertEqual(Set(try engine.recent(board: nil, limit: 10).map(\.id)), Set([original.id, pinned.id]))
+        XCTAssertEqual(engine.text(of: try XCTUnwrap(try engine.recent(board: nil, limit: 10).first { $0.id == pinned.id })), "https://example.com")
+    }
+
     func testBoardsAndAppIconsAreAvailable() throws {
         try engine.addBoard(id: "list:codes", name: "Codes")
         _ = try engine.capture(items: textItem("x"), source: terminal, now: 1)
