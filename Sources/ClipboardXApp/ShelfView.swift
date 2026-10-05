@@ -386,8 +386,12 @@ struct CardView: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 14).padding(.vertical, 10).frame(height: 66)
-            .background { Rectangle().fill(LinearGradient(colors: [headerColor.opacity(0.98), headerColor.opacity(0.84)], startPoint: .top, endPoint: .bottom)) }
-            .overlay(alignment: .top) { LinearGradient(colors: [.white.opacity(0.28), .clear], startPoint: .top, endPoint: .bottom).frame(height: 22) }
+            .background {
+                ZStack {
+                    Rectangle().fill(headerColor)
+                    Rectangle().fill(LinearGradient(colors: [.clear, .black.opacity(0.16)], startPoint: .top, endPoint: .bottom))   // same hue, a touch deeper at the bottom
+                }
+            }
             .clipShape(Self.headerShape)   // rounded only where it meets the card's corners; the bottom edge is straight
 
             expandedBody.frame(maxWidth: .infinity, maxHeight: .infinity)

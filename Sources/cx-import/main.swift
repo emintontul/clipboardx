@@ -1,3 +1,4 @@
+import AppKit
 import ClipboardXKit
 import Foundation
 
@@ -16,6 +17,23 @@ let args = Array(CommandLine.arguments.dropFirst())
 if args.first == "demo" {
     guard let out = option("--out", in: args) else { fail("usage: cx-import demo --out <empty folder>") }
     do { try DemoSeed.run(at: out); exit(0) } catch { fail("error: \(error)") }
+}
+
+if args.first == "app-colors" {
+    // Prints the header color ClipboardX would pick for each installed app's icon.
+    let ids = ["com.google.Chrome", "com.apple.Safari", "com.apple.Notes", "com.apple.mail", "com.apple.Terminal", "com.apple.finder", "com.apple.dt.Xcode",
+               "com.apple.Preview", "com.apple.MobileSMS", "net.whatsapp.WhatsApp", "com.tinyspeck.slackmacgap", "com.microsoft.VSCode", "ru.keepcoder.Telegram",
+               "com.apple.Photos", "com.apple.iCal", "com.apple.reminders", "com.apple.systempreferences", "com.openai.chat", "company.thebrowser.Browser", "com.figma.Desktop"]
+    for id in ids {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { continue }
+        let size = NSSize(width: 64, height: 64)
+        let image = NSImage(size: size)
+        image.lockFocus(); NSWorkspace.shared.icon(forFile: url.path).draw(in: NSRect(origin: .zero, size: size)); image.unlockFocus()
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { continue }
+        let hex = AppColor.dominant(of: png).map { String(format: "#%06X", $0 & 0xFFFFFF) } ?? "none"
+        print("\(id) \(hex)")
+    }
+    exit(0)
 }
 
 if args.first == "trash" {
