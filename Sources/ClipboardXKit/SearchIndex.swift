@@ -300,7 +300,8 @@ public final class SearchIndex {
         var sql: String, params: [SQLValue] = []
         switch scope {
         case .all: sql = " AND d.deleted_at IS NULL"
-        case .history: sql = " AND d.board IS NULL AND d.deleted_at IS NULL"
+        // The unary plus keeps SQLite on docs_copied; otherwise it walks every un-pinned clip via docs_board and sorts them.
+        case .history: sql = " AND +d.board IS NULL AND d.deleted_at IS NULL"
         case .board(let id): sql = " AND d.board = ? AND d.deleted_at IS NULL"; params = [.text(id)]
         case .trash: sql = " AND d.deleted_at IS NOT NULL"
         }
