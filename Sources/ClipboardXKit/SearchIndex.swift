@@ -72,6 +72,8 @@ public final class SearchIndex {
         try db.execute("CREATE INDEX IF NOT EXISTS docs_app ON docs(app_c, copied DESC)")
         try db.execute("CREATE INDEX IF NOT EXISTS docs_board ON docs(board, board_order, copied DESC)")
         try db.execute("CREATE INDEX IF NOT EXISTS docs_fp ON docs(fp) WHERE fp IS NOT NULL")
+        // Without this, "which apps have clips" scanned the whole table once per app and the shelf took seconds to open.
+        try db.execute("CREATE INDEX IF NOT EXISTS docs_app_live ON docs(app_id, deleted_at)")
         try db.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
           title_c, body_c, app_c, title_n, body_n, tokenize='trigram')
@@ -165,15 +167,24 @@ public final class SearchIndex {
         return value
     }
 
+    private static let appsInUseSQL = """
+    SELECT a.bundle,a.name,a.icon FROM apps a
+    WHERE EXISTS (SELECT 1 FROM docs d WHERE d.app_id = a.bundle AND d.deleted_at IS NULL)
+    ORDER BY a.name COLLATE NOCASE
+    """
+
     /// Apps that have at least one live clip, for the app filter list.
     public func appsInUse() throws -> [AppRecord] {
         var out: [AppRecord] = []
-        try db.query("""
-        SELECT a.bundle,a.name,a.icon FROM apps a
-        WHERE EXISTS (SELECT 1 FROM docs d WHERE d.app_id = a.bundle AND d.deleted_at IS NULL)
-        ORDER BY a.name COLLATE NOCASE
-        """) { out.append(AppRecord(bundleID: $0.text(0) ?? "", name: $0.text(1) ?? "", iconBlob: $0.text(2))) }
+        try db.query(Self.appsInUseSQL) { out.append(AppRecord(bundleID: $0.text(0) ?? "", name: $0.text(1) ?? "", iconBlob: $0.text(2))) }
         return out
+    }
+
+    /// SQLite's plan for `appsInUse`, so a test can make sure it stays index-driven.
+    func appsInUseQueryPlan() throws -> String {
+        var lines: [String] = []
+        try db.query("EXPLAIN QUERY PLAN " + Self.appsInUseSQL) { lines.append($0.text(3) ?? "") }
+        return lines.joined(separator: "\n")
     }
 
     /// Ids of trashed clips deleted before `cutoff` (seconds since 1970).

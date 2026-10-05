@@ -246,7 +246,13 @@ final class ShelfModel: ObservableObject {
         return true
     }
 
-    func refreshApps() { appsInUse = (try? engine.appsInUse()) ?? [] }
+    /// Loads the app list off the main thread, so opening the shelf never waits for it.
+    func refreshApps() {
+        DispatchQueue.global(qos: .userInitiated).async { [engine, weak self] in
+            let apps = (try? engine.appsInUse()) ?? []
+            DispatchQueue.main.async { self?.appsInUse = apps }
+        }
+    }
 
     // MARK: paste stack
 

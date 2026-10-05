@@ -111,4 +111,19 @@ extension SearchIndexTests {
         try add("named", title: "ToggLite", text: "x")
         XCTAssertEqual(try ids("tog lite"), ["named"])
     }
+
+    func testAppsInUseUsesAnIndexInsteadOfScanningEveryClipPerApp() throws {
+        let plan = try index.appsInUseQueryPlan()
+        XCTAssertTrue(plan.contains("docs_app_live"), "the lookup must use its index, plan was: \(plan)")
+        XCTAssertFalse(plan.contains("SCAN d"), "scanning the whole docs table for each app is what made the shelf open slowly: \(plan)")
+    }
+
+    func testAppsInUseListsOnlyAppsWithLiveClips() throws {
+        try index.replaceMetadata(boards: [], apps: [AppRecord(bundleID: "a.one", name: "One", iconBlob: nil), AppRecord(bundleID: "a.two", name: "Two", iconBlob: nil)])
+        let record = ClipRecord(id: "x", createdAt: 1, copiedAt: 1, title: nil, appBundleID: "a.one", board: nil, boardOrder: nil, rawKind: 5, representations: [], source: "t")
+        try index.upsert(SearchDocument(id: "x", title: nil, text: "hello", appName: "One", copiedAt: 1, board: nil, record: record))
+        XCTAssertEqual(try index.appsInUse().map(\.name), ["One"])
+        try index.setDeleted(id: "x", at: 5)
+        XCTAssertEqual(try index.appsInUse().map(\.name), [])
+    }
 }
