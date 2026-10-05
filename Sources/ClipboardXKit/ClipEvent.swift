@@ -121,15 +121,17 @@ public struct AppRecord: Codable, Equatable, Sendable {
 public enum ClipEvent: Codable, Equatable, Sendable {
     case put(ClipRecord)
     case board(BoardRecord)
+    case boardDeleted(String)
     case app(AppRecord)
 
-    private enum Keys: String, CodingKey { case op, record }
+    private enum Keys: String, CodingKey { case op, record, boardID }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         switch try c.decode(String.self, forKey: .op) {
         case "put": self = .put(try c.decode(ClipRecord.self, forKey: .record))
         case "board": self = .board(try c.decode(BoardRecord.self, forKey: .record))
+        case "boardDeleted": self = .boardDeleted(try c.decode(String.self, forKey: .boardID))
         case "app": self = .app(try c.decode(AppRecord.self, forKey: .record))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .op, in: c, debugDescription: "unknown op \(other)")
@@ -141,6 +143,7 @@ public enum ClipEvent: Codable, Equatable, Sendable {
         switch self {
         case .put(let r): try c.encode("put", forKey: .op); try c.encode(r, forKey: .record)
         case .board(let r): try c.encode("board", forKey: .op); try c.encode(r, forKey: .record)
+        case .boardDeleted(let id): try c.encode("boardDeleted", forKey: .op); try c.encode(id, forKey: .boardID)
         case .app(let r): try c.encode("app", forKey: .op); try c.encode(r, forKey: .record)
         }
     }

@@ -98,6 +98,66 @@ public final class LibraryEngine {
         }
     }
 
+    public func renameBoard(_ id: String, to name: String) throws {
+        try locked {
+            let current = try board(id)
+            let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { throw LibraryError.emptyBoardName }
+            try saveBoard(BoardRecord(id: current.id, name: name, index: current.index, kind: current.kind,
+                                     createdAt: current.createdAt, attributesBlob: current.attributesBlob))
+        }
+    }
+
+    public func setBoardColor(_ id: String, to colorCode: UInt32) throws {
+        try locked {
+            let current = try board(id)
+            var attributes: [String: Any] = [:]
+            if let blob = current.attributesBlob, let data = try? blobs.get(blob),
+               let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                attributes = existing
+            }
+            attributes["type"] = attributes["type"] ?? "pinboard"
+            attributes["colorCode"] = colorCode
+            let data = try JSONSerialization.data(withJSONObject: attributes, options: [.sortedKeys])
+            let blob = try blobs.put(data)
+            try saveBoard(BoardRecord(id: current.id, name: current.name, index: current.index, kind: current.kind,
+                                     createdAt: current.createdAt, attributesBlob: blob))
+        }
+    }
+
+    public func moveBoard(_ id: String, by offset: Int) throws {
+        try locked {
+            var boards = try index.boards()
+            guard let source = boards.firstIndex(where: { $0.id == id }) else { throw LibraryError.unknownBoard(id) }
+            let destination: Int
+            if offset < 0 {
+                destination = source + max(offset, -source)
+            } else {
+                destination = source + min(offset, boards.count - 1 - source)
+            }
+            guard source != destination else { return }
+            let moved = boards.remove(at: source)
+            boards.insert(moved, at: destination)
+            for (newIndex, current) in boards.enumerated() where current.index != newIndex {
+                try saveBoard(BoardRecord(id: current.id, name: current.name, index: newIndex, kind: current.kind,
+                                         createdAt: current.createdAt, attributesBlob: current.attributesBlob))
+            }
+        }
+    }
+
+    /// Removes a pinboard without discarding its clips; pinned copies become ordinary history records.
+    public func deleteBoard(_ id: String) throws {
+        try locked {
+            _ = try board(id)
+            for record in try index.records(inBoard: id) {
+                _ = try commit(record.with(board: .some(nil), boardOrder: .some(nil), source: "unpin"))
+            }
+            try log.append(.boardDeleted(id))
+            try log.sync()
+            try index.removeBoard(id)
+        }
+    }
+
     public func registerApp(_ source: SourceApp) throws {
         try locked {
             let known = try index.app(bundleID: source.bundleID)
@@ -170,7 +230,22 @@ public final class LibraryEngine {
 
     // MARK: internals
 
-    public enum LibraryError: Error { case unknownRecord(String) }
+    public enum LibraryError: Error {
+        case unknownRecord(String)
+        case unknownBoard(String)
+        case emptyBoardName
+    }
+
+    private func board(_ id: String) throws -> BoardRecord {
+        guard let board = try index.boards().first(where: { $0.id == id }) else { throw LibraryError.unknownBoard(id) }
+        return board
+    }
+
+    private func saveBoard(_ board: BoardRecord) throws {
+        try log.append(.board(board))
+        try log.sync()
+        try index.upsertBoard(board)
+    }
 
     @discardableResult
     private func commit(_ record: ClipRecord) throws -> ClipRecord {

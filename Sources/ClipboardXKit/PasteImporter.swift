@@ -86,6 +86,7 @@ public enum PasteImporter {
             switch event {
             case .put(let r): found.items.insert(r.id)
             case .board(let b): found.boards.insert(b.id)
+            case .boardDeleted(let id): found.boards.remove(id)
             case .app(let a): found.apps.insert(a.bundleID)
             }
         }
