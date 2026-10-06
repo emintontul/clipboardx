@@ -118,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             PasteAction.perform(items: items, plainText: plain, autoPaste: settings.pasteToActiveApp)
             self.model.didPaste(record)
+            DispatchQueue.global(qos: .utility).async { [engine] in try? engine.markUsed(record.id) }
         }
     }
 

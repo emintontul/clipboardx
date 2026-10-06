@@ -364,6 +364,16 @@ final class LibraryEngineTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: BlobStoreTestAccess.path(library: dir, id: oldBlob)))
     }
 
+    func testMarkUsedMovesAClipToTheFrontWithoutDuplicating() throws {
+        let old = try XCTUnwrap(try engine.capture(items: textItem("older clip"), source: terminal, now: 10))
+        _ = try XCTUnwrap(try engine.capture(items: textItem("newer clip"), source: terminal, now: 20))
+        try engine.markUsed(old.id, now: 30)
+        let recent = try engine.recent(board: nil, limit: 10)
+        XCTAssertEqual(recent.map(\.id).first, old.id)
+        XCTAssertEqual(recent.count, 2)
+        XCTAssertEqual(recent.first?.copiedAt, 30)
+    }
+
     func testRenameRecolorAndDeleteBoard() throws {
         try engine.addBoard(id: "list:a", name: "Alpha", colorCode: 0xFF112233)
         try engine.renameBoard("list:a", to: "Alpha 2")

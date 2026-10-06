@@ -309,6 +309,15 @@ public final class LibraryEngine {
         }
     }
 
+    /// Pasting a clip counts as using it again, so it moves to the front of history instead of leaving a copy behind.
+    public func markUsed(_ id: String, now: Double = Date().timeIntervalSince1970) throws {
+        try locked {
+            try requireReady()
+            guard let record = try index.records(ids: [id]).first else { throw LibraryError.unknownRecord(id) }
+            try commit(record.with(copiedAt: now), at: now)
+        }
+    }
+
     // MARK: pinboard management
 
     public func renameBoard(_ id: String, to name: String, now: Double = Date().timeIntervalSince1970) throws {
