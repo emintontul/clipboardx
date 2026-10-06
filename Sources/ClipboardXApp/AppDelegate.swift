@@ -110,8 +110,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         backdrop = window
     }
 
+    private var pasteWaits = 0
+
+    private static func isHeld(_ keyCode: CGKeyCode) -> Bool {
+        CGEventSource.keyState(.combinedSessionState, key: keyCode)
+    }
+
     private func paste(_ record: ClipRecord, plain: Bool) {
         guard let items = try? engine.payload(of: record) else { return }
+        // Keep the shelf up until Return/Enter is physically released: its key-up and auto-repeat would otherwise land in the
+        // app we are pasting into, which answers with the error beep.
+        if Self.isHeld(36) || Self.isHeld(76), pasteWaits < 40 {
+            pasteWaits += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in self?.paste(record, plain: plain) }
+            return
+        }
+        pasteWaits = 0
         shelf.hide()
         if settings.soundEffects { NSSound(named: "Pop")?.play() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, settings] in

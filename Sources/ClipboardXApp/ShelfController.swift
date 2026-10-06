@@ -163,8 +163,9 @@ final class ShelfController {
         case 51 where !command && model.query.isEmpty && model.hasFilters: consumedKeys.insert(event.keyCode); _ = model.removeLastFilter(); return nil
         case 123 where !command: consumedKeys.insert(event.keyCode); model.move(-1); return nil
         case 124 where !command: consumedKeys.insert(event.keyCode); model.move(1); return nil
-        case 36, 76: consumedKeys.insert(event.keyCode); model.pasteSelected(plain: shift); return nil
-        case 51, 117 where command: consumedKeys.insert(event.keyCode); model.deleteSelected(); return nil
+        case 36, 76: consumedKeys.insert(event.keyCode); if !event.isARepeat { model.pasteSelected(plain: shift) }; return nil
+        // Backspace deletes only when the search box is empty, otherwise it edits the query.
+        case 51 where command || model.query.isEmpty, 117 where command: consumedKeys.insert(event.keyCode); model.deleteSelected(); return nil
         case 14 where command: consumedKeys.insert(event.keyCode); model.editSelected(); return nil
         default: break
         }
