@@ -57,6 +57,14 @@ public enum LibraryBackup {
         return BackupResult(blobsPacked: pending.count, packsWritten: written, logFilesCopied: copied)
     }
 
+    /// Cheap fingerprint of "has anything been written since": every new blob comes with a log event, so the log segment
+    /// names and sizes are enough. Lets the scheduler skip a full scan of hundreds of thousands of blob files.
+    public static func changeSignature(library: URL) -> String {
+        let dir = library.appendingPathComponent("log")
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasSuffix(".jsonl") }.sorted()
+        return names.map { "\($0):\(size(dir.appendingPathComponent($0)))" }.joined(separator: "|")
+    }
+
     // MARK: restore
 
     public static func restore(from backup: URL, to library: URL) throws -> RestoreResult {

@@ -41,6 +41,15 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertEqual(try EventLog.readAll(directory: restored.appendingPathComponent("log")).count, 40)
     }
 
+    func testChangeSignatureIsStableUntilTheLogGrows() throws {
+        try seed(3)
+        let before = LibraryBackup.changeSignature(library: library)
+        XCTAssertEqual(LibraryBackup.changeSignature(library: library), before)
+        let log = try EventLog(directory: library.appendingPathComponent("log"), deviceID: "dev1")
+        try log.append(.app(AppRecord(bundleID: "app.new", name: "n", iconBlob: nil))); try log.sync()
+        XCTAssertNotEqual(LibraryBackup.changeSignature(library: library), before)
+    }
+
     func testSecondRunPacksOnlyNewBlobs() throws {
         try seed(10)
         _ = try LibraryBackup.backup(library: library, destination: backup, packSize: 1_000_000, deviceID: "dev1")

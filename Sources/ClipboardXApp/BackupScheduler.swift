@@ -9,6 +9,8 @@ final class BackupScheduler {
     private let settings: AppSettings
     private var timer: Timer?
     private let queue = DispatchQueue(label: "clipboardx.backup", qos: .utility)
+    /// Signature and time of the last complete pass; an unchanged library skips the heavy scan for up to six hours.
+    private var lastComplete: (signature: String, at: Date, line: String)?
     private(set) var status = "iCloud backup: not run yet"
     var onStatus: (() -> Void)?
     /// Called on the main thread after other Macs' changes were merged in.
@@ -39,10 +41,17 @@ final class BackupScheduler {
         update("iCloud backup: running…")
         queue.async { [library, destination, deviceID, engine, settings, weak self] in
             do {
-                let result = try LibraryBackup.backup(library: library, destination: destination, deviceID: deviceID)
-                let report = try LibraryBackup.verify(library: library, backup: destination)
-                let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
-                var line = report.complete ? "iCloud backup: complete at \(stamp) (+\(result.blobsPacked) new)" : "iCloud backup: INCOMPLETE, \(report.missingFromBackup) missing"
+                let signature = LibraryBackup.changeSignature(library: library)
+                var line: String
+                if let last = self?.lastComplete, last.signature == signature, Date().timeIntervalSince(last.at) < 6 * 3600 {
+                    line = last.line
+                } else {
+                    let result = try LibraryBackup.backup(library: library, destination: destination, deviceID: deviceID)
+                    let report = try LibraryBackup.verify(library: library, backup: destination)
+                    let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
+                    line = report.complete ? "iCloud backup: complete at \(stamp) (+\(result.blobsPacked) new)" : "iCloud backup: INCOMPLETE, \(report.missingFromBackup) missing"
+                    self?.lastComplete = report.complete ? (signature, Date(), line) : nil
+                }
                 if settings.icloudSync, !engine.isIndexing {
                     let sync = try LibrarySync(engine: engine, sharedRoot: destination.deletingLastPathComponent(), ownFolder: destination.lastPathComponent).syncNow()
                     if sync.devices == 0 { line += " · no other Macs yet" }

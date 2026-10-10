@@ -66,7 +66,8 @@ public final class BlobStore: @unchecked Sendable {
 
     /// Every stored blob id. Ids are the file names two directory levels down.
     public func allIDs() -> [String] {
-        guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
+        // No property prefetch: it costs a stat() per file, and the 64-character name already identifies a blob.
+        guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return [] }
         return walker.compactMap { $0 as? URL }
             .filter { $0.lastPathComponent.count == 64 && !$0.lastPathComponent.hasPrefix(".") }
             .map(\.lastPathComponent)
