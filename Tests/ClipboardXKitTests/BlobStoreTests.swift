@@ -48,4 +48,18 @@ final class BlobStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         XCTAssertThrowsError(try store.get(String(repeating: "0", count: 64)))
     }
+
+    func testCachedIDsScanOnceThenFollowWrites() throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = try store.put(Data("one".utf8))
+        XCTAssertEqual(store.cachedIDs(), [first])
+        let second = try store.put(Data("two".utf8))
+        let imported = try BlobStore(root: dir.appendingPathComponent("other"))
+        let stored = try store.storedBytes(second)
+        let third = Hashing.sha256Hex(Data("two".utf8))
+        try imported.importStored(third, stored: stored)
+        XCTAssertEqual(store.cachedIDs(), [first, second])
+        XCTAssertEqual(imported.cachedIDs(), [third])
+    }
 }

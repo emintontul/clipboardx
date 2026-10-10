@@ -133,6 +133,9 @@ public final class LibraryEngine {
     // MARK: sync with other Macs
 
     /// Where to read a blob that is not on this Mac yet (another Mac's backup pack).
+    /// The engine's own blob store, shared with the backup so its id cache is scanned only once.
+    public var blobStore: BlobStore { blobs }
+
     public func setRemoteBlobProvider(_ provider: ((String) -> Data?)?) { blobs.setFallback(provider) }
 
     /// True only when the blob file is already on this Mac (no fetching).

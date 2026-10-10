@@ -46,8 +46,8 @@ final class BackupScheduler {
                 if let last = self?.lastComplete, last.signature == signature, Date().timeIntervalSince(last.at) < 6 * 3600 {
                     line = last.line
                 } else {
-                    let result = try LibraryBackup.backup(library: library, destination: destination, deviceID: deviceID)
-                    let report = try LibraryBackup.verify(library: library, backup: destination)
+                    let result = try LibraryBackup.backup(library: library, destination: destination, deviceID: deviceID, store: engine.blobStore)
+                    let report = try LibraryBackup.verify(library: library, backup: destination, store: engine.blobStore)
                     let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
                     line = report.complete ? "iCloud backup: complete at \(stamp) (+\(result.blobsPacked) new)" : "iCloud backup: INCOMPLETE, \(report.missingFromBackup) missing"
                     self?.lastComplete = report.complete ? (signature, Date(), line) : nil

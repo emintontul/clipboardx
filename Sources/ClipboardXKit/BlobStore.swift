@@ -12,6 +12,8 @@ public final class BlobStore: @unchecked Sendable {
     private let root: URL
     private let fallbackLock = NSLock()
     private var fallback: ((String) -> Data?)?
+    private let idsLock = NSLock()
+    private var ids: Set<String>?
 
     public init(root: URL) throws {
         self.root = root
@@ -31,6 +33,7 @@ public final class BlobStore: @unchecked Sendable {
         if FileManager.default.fileExists(atPath: url.path) { return id }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encode(data).write(to: url, options: .atomic)
+        remember(id)
         return id
     }
 
@@ -68,9 +71,27 @@ public final class BlobStore: @unchecked Sendable {
     public func allIDs() -> [String] {
         // No property prefetch: it costs a stat() per file, and the 64-character name already identifies a blob.
         guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return [] }
-        return walker.compactMap { $0 as? URL }
-            .filter { $0.lastPathComponent.count == 64 && !$0.lastPathComponent.hasPrefix(".") }
-            .map(\.lastPathComponent)
+        var ids: [String] = []
+        for case let url as URL in walker {
+            let name = url.lastPathComponent
+            if name.utf8.count == 64, name.utf8.first != UInt8(ascii: ".") { ids.append(name) }
+        }
+        return ids
+    }
+
+    /// All blob ids, scanned from disk once per store and kept current by `put` and `importStored`. Hundreds of thousands of
+    /// files make a directory walk cost tens of seconds, which the periodic backup must not repeat.
+    public func cachedIDs() -> Set<String> {
+        idsLock.lock(); defer { idsLock.unlock() }
+        if let ids { return ids }
+        let scanned = Set(allIDs())
+        ids = scanned
+        return scanned
+    }
+
+    private func remember(_ id: String) {
+        idsLock.lock(); defer { idsLock.unlock() }
+        ids?.insert(id)
     }
 
     /// Raw on-disk bytes (codec byte + payload), used by backups so blobs are never recompressed.
@@ -86,6 +107,7 @@ public final class BlobStore: @unchecked Sendable {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try stored.write(to: url, options: .atomic)
         do { _ = try get(id) } catch { try? FileManager.default.removeItem(at: url); throw error }
+        remember(id)
     }
 
     public func contains(_ id: String) -> Bool {

@@ -32,16 +32,17 @@ public enum LibraryBackup {
 
     // MARK: backup
 
-    public static func backup(library: URL, destination: URL, packSize: Int = defaultPackSize, deviceID: String) throws -> BackupResult {
+    public static func backup(library: URL, destination: URL, packSize: Int = defaultPackSize, deviceID: String,
+                              store sharedStore: BlobStore? = nil) throws -> BackupResult {
         let fm = FileManager.default
         let packs = destination.appendingPathComponent("packs", isDirectory: true)
         try fm.createDirectory(at: packs, withIntermediateDirectories: true)
         let copied = try copyLogs(from: library.appendingPathComponent("log"), to: destination.appendingPathComponent("log"))
 
-        let store = try BlobStore(root: library.appendingPathComponent("blobs"))
+        let store = try sharedStore ?? BlobStore(root: library.appendingPathComponent("blobs"))
         let existing = try validPacks(in: packs)
         let packed = Set(existing.flatMap(\.ids))
-        let pending = store.allIDs().filter { !packed.contains($0) }.sorted()
+        let pending = store.cachedIDs().filter { !packed.contains($0) }.sorted()
         var sequence = (existing.map(\.sequence).max() ?? 0) + 1
         var written = 0
 
@@ -94,12 +95,12 @@ public enum LibraryBackup {
     // MARK: verify
 
     /// Cheap completeness check: every library blob is listed in a valid pack index and every log segment is backed up.
-    public static func verify(library: URL, backup: URL) throws -> BackupReport {
-        let store = try BlobStore(root: library.appendingPathComponent("blobs"))
+    public static func verify(library: URL, backup: URL, store sharedStore: BlobStore? = nil) throws -> BackupReport {
+        let store = try sharedStore ?? BlobStore(root: library.appendingPathComponent("blobs"))
         let packsDir = backup.appendingPathComponent("packs")
         let valid = try validPacks(in: packsDir)
         let packed = Set(valid.flatMap(\.ids))
-        let local = store.allIDs()
+        let local = store.cachedIDs()
         let fm = FileManager.default
         let packFiles = ((try? fm.contentsOfDirectory(atPath: packsDir.path)) ?? []).filter { $0.hasSuffix(".idx") }.count
         let logSource = library.appendingPathComponent("log"), logBackup = backup.appendingPathComponent("log")
